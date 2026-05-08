@@ -46,13 +46,13 @@ El modelo se organiza alrededor de cuatro entidades principales:
 
 **Municipios PDET** — polígonos administrativos de DANE/MGN, filtrados a los territorios con estatus PDET. Un documento por municipio.
 
-**Footprints Microsoft** — polígonos de edificios del dataset de Microsoft. Un documento por edificio.
+**Footprints Microsoft** — polígonos de edificios del dataset de Microsoft Global ML Building Footprints (formato GeoJSON). Un documento por edificio.
 
-**Footprints Google** — polígonos de edificios de Google Open Buildings. Un documento por edificio. Incluye score de confianza (característica propia de este dataset).
+**Footprints Google** — polígonos de edificios de Google Open Buildings (geometría WKT `POLYGON`/`MULTIPOLYGON`, coordenadas en WGS84). Incluye score de confianza (característica propia de este dataset).
 
 **Resultados de Análisis** — conteos y áreas pre-agregadas por municipio y por dataset, para evitar re-ejecutar joins espaciales costosos.
 
-Todas las geometrías se almacenan como **GeoJSON** (`type: "Polygon"` o `"MultiPolygon"`) para aprovechar los operadores nativos de MongoDB: `$geoIntersects`, `$geoWithin` y `$near`.
+Todas las geometrías se almacenan como **GeoJSON** (`type: "MultiPolygon"`) en coordenadas **WGS84 (EPSG:4326)**, que es el único CRS compatible con los índices `2dsphere` de MongoDB. El área de cada edificio (`area_m2`) se almacena como atributo precalculado en metros cuadrados, aprovechando que ambas fuentes lo suministran directamente (`area_in_meters` en Google, calculado sobre WGS84 en Microsoft). Esto evita la necesidad de reprojectar geometrías para los cálculos de área.
 
 ---
 
@@ -67,9 +67,9 @@ Todas las geometrías se almacenan como **GeoJSON** (`type: "Polygon"` o `"Multi
   "name": "string",               // Nombre del municipio
   "department": "string",         // Nombre del departamento
   "is_pdet": true,                // Siempre true tras el filtrado
-  "geometry": {                   // GeoJSON Polygon
-    "type": "Polygon",
-    "coordinates": [[[lon, lat], "..."]]
+  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
+    "type": "MultiPolygon",
+    "coordinates": [[[[lon, lat], "..."]]]
   },
   "area_km2": 123.45,
   "source": "MGN2025",
@@ -79,9 +79,9 @@ Todas las geometrías se almacenan como **GeoJSON** (`type: "Polygon"` o `"Multi
 
 **Índices:**
 ```javascript
+// Solo el índice espacial es necesario; con ~170 municipios PDET
+// los escaneos de colección completa son triviales.
 db.municipalities.createIndex({ "geometry": "2dsphere" })
-db.municipalities.createIndex({ "dane_code": 1 }, { unique: true })
-db.municipalities.createIndex({ "is_pdet": 1 })
 ```
 
 ---
@@ -91,11 +91,11 @@ db.municipalities.createIndex({ "is_pdet": 1 })
 ```json
 {
   "_id": ObjectId,
-  "geometry": {                   // GeoJSON Polygon
-    "type": "Polygon",
-    "coordinates": [[[lon, lat], "..."]]
+  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
+    "type": "MultiPolygon",
+    "coordinates": [[[[lon, lat], "..."]]]
   },
-  "area_m2": 87.3,               // Calculado a partir de la geometría
+  "area_m2": 87.3,               // Suministrado por la fuente (precalculado sobre WGS84)
   "municipality_code": "string", // Asignado mediante join espacial (Semana 4)
   "source": "microsoft",
   "ingested_at": "ISODate"
@@ -115,13 +115,12 @@ db.buildings_microsoft.createIndex({ "municipality_code": 1 })
 ```json
 {
   "_id": ObjectId,
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[lon, lat], "..."]]
+  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
+    "type": "MultiPolygon",       // Fuente original: WKT POLYGON/MULTIPOLYGON → convertido a GeoJSON
+    "coordinates": [[[[lon, lat], "..."]]]
   },
-  "area_m2": 64.1,
-  "confidence": 0.87,            // Específico de Google: confianza de detección [0,1]
-  "full_plus_code": "string",    // Identificador propio de Google
+  "area_m2": 64.1,               // Campo area_in_meters de la fuente (metros cuadrados)
+  "confidence": 0.87,            // Específico de Google: confianza de detección [0.65, 1.0]
   "municipality_code": "string",
   "source": "google",
   "ingested_at": "ISODate"
@@ -174,7 +173,7 @@ erDiagram
         string name
         string department
         bool is_pdet
-        GeoJSON geometry
+        GeoJSON_MultiPolygon geometry
         float area_km2
         string source
         ISODate ingested_at
@@ -182,7 +181,7 @@ erDiagram
 
     BUILDINGS_MICROSOFT {
         ObjectId _id
-        GeoJSON geometry
+        GeoJSON_MultiPolygon geometry
         float area_m2
         string municipality_code
         string source
@@ -191,10 +190,9 @@ erDiagram
 
     BUILDINGS_GOOGLE {
         ObjectId _id
-        GeoJSON geometry
+        GeoJSON_MultiPolygon geometry
         float area_m2
         float confidence
-        string full_plus_code
         string municipality_code
         string source
         ISODate ingested_at
@@ -223,20 +221,20 @@ erDiagram
 ```mermaid
 flowchart TD
     A([Shapefile DANE/MGN]) --> B[GeoPandas: lectura y filtrado PDET]
-    B --> C[Conversión a GeoJSON]
+    B --> C[Conversión a GeoJSON MultiPolygon WGS84]
     C --> D[(municipalities)]
 
-    E([Microsoft Building Footprints]) --> F[Parseo y cálculo de area_m2]
+    E([Microsoft Building Footprints\nGeoJSON — WGS84]) --> F[Parseo → MultiPolygon\narea_m2 desde fuente]
     F --> G[(buildings_microsoft)]
 
-    H([Google Open Buildings]) --> I[Parseo y cálculo de area_m2]
+    H([Google Open Buildings\nCSV WKT POLYGON/MULTIPOLYGON]) --> I[WKT → GeoJSON MultiPolygon\narea_m2 = area_in_meters]
     I --> J[(buildings_google)]
 
     D --> K{Join Espacial\n$geoIntersects}
     G --> K
     J --> K
 
-    K --> L[Aggregation Pipeline\nconteo + suma de área]
+    K --> L[Aggregation Pipeline\nconteo + suma de área en m²]
     L --> M[(analysis_results)]
     M --> N([Informe Final / Mapas])
 
@@ -254,8 +252,7 @@ flowchart TD
 flowchart LR
     subgraph municipalities
         A1[2dsphere: geometry]
-        A2[unique: dane_code]
-        A3[is_pdet]
+        A2["— sin índices adicionales —\n~170 docs, escaneo trivial"]
     end
 
     subgraph buildings_microsoft
@@ -276,7 +273,6 @@ flowchart LR
     Q1([Consulta geoIntersects]) --> A1
     Q1 --> B1
     Q1 --> C1
-    Q2([Filtrar por PDET]) --> A3
     Q3([Agregar por municipio]) --> B2
     Q3 --> C2
 ```
@@ -290,15 +286,15 @@ sequenceDiagram
     participant Script
     participant MongoDB
 
-    Script->>MongoDB: Obtener todos los municipios PDET
-    MongoDB-->>Script: Lista de {dane_code, geometry}
+    Script->>MongoDB: Obtener todos los municipios PDET (~170 docs)
+    MongoDB-->>Script: Lista de {dane_code, geometry: MultiPolygon}
 
     loop Por cada municipio
         Script->>MongoDB: buildings_microsoft.find({geometry: {$geoIntersects: muni.geometry}})
         MongoDB-->>Script: edificios coincidentes[]
         Script->>MongoDB: buildings_google.find({geometry: {$geoIntersects: muni.geometry}})
         MongoDB-->>Script: edificios coincidentes[]
-        Script->>MongoDB: analysis_results.insertOne({conteo, area_total, dataset})
+        Script->>MongoDB: analysis_results.insertOne({conteo, area_total_m2, dataset})
     end
 ```
 
@@ -308,10 +304,11 @@ sequenceDiagram
 
 MongoDB es la opción NoSQL más apropiada para este proyecto por tres razones concretas:
 
-Primero, soporta GeoJSON de forma nativa y los índices `2dsphere` permiten ejecutar operaciones espaciales directamente en la base de datos, sin necesidad de software GIS externo en la fase de análisis.
+Primero, soporta GeoJSON de forma nativa y los índices `2dsphere` permiten ejecutar operaciones espaciales directamente en la base de datos, sin necesidad de software GIS externo en la fase de análisis. MongoDB opera sobre WGS84 (EPSG:4326), que es el CRS nativo de ambas fuentes de datos, por lo que no se requiere reproyección para los joins espaciales.
 
 Segundo, su aggregation pipeline permite calcular conteos y sumas de área en una sola consulta, lo que es eficiente para los volúmenes de datos esperados (cientos de miles de edificios por municipio).
 
-Tercero, el esquema flexible de documentos facilita almacenar los campos propios de cada dataset (por ejemplo, `confidence` de Google o `full_plus_code`) sin forzar un esquema rígido común, lo cual simplifica la integración de múltiples fuentes de datos abiertos.
+Tercero, el esquema flexible de documentos facilita almacenar los campos propios de cada dataset (por ejemplo, `confidence` de Google) sin forzar un esquema rígido común, lo cual simplifica la integración de múltiples fuentes de datos abiertos.
 
 Alternativas como Apache Cassandra o Amazon DynamoDB no tienen soporte espacial nativo y requerirían procesamientos externos adicionales, contradiciendo el objetivo de simplicidad y reproducibilidad del proyecto.
+
