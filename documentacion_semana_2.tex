@@ -1,0 +1,185 @@
+\documentclass[12pt]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+}
+
+\lstdefinestyle{basicstyle}{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible
+}
+
+\title{Documentacion de la Entrega Semana 2\\Integracion de Limites Municipales PDET}
+\author{Proyecto-DBA}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Resumen del proyecto}
+
+Este proyecto tiene como objetivo construir una base de datos NoSQL en MongoDB para trabajar con informacion geoespacial de municipios PDET y, en fases posteriores, cruzarla con datasets de edificios. La entrega de la semana 2 se concentra en la integracion de los limites municipales oficiales, asegurando que el proyecto opere exclusivamente con municipios PDET.
+
+\section{Objetivo de la semana 2}
+
+El objetivo de esta entrega es cargar en MongoDB los municipios PDET a partir de limites oficiales DANE/MGN, garantizando la consistencia de los datos, el formato espacial correcto y la documentacion del proceso.
+
+La revision de esta entrega se centra en cuatro aspectos:
+
+\begin{itemize}[leftmargin=*]
+    \item Data Acquisition \& Verification
+    \item Data Integrity \& Format
+    \item NoSQL Spatial Integration
+    \item Documentation of Process
+\end{itemize}
+
+\section{Archivos de entrada}
+
+El proceso de carga utiliza los siguientes archivos:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{MunicipiosPDET.xlsx}
+    \item \texttt{MGN\_2025\_COLOMBIA/ADMINISTRATIVO/MGN\_ADM\_MPIO\_GRAFICO.shp}
+\end{itemize}
+
+Ademas del archivo \texttt{.shp}, el shapefile debe conservar sus archivos auxiliares asociados, como \texttt{.dbf}, \texttt{.shx} y \texttt{.prj}, dentro de la misma carpeta.
+
+\section{Tecnologias utilizadas}
+
+\begin{longtable}{|>{\raggedright\arraybackslash}p{4cm}|>{\raggedright\arraybackslash}p{4cm}|>{\raggedright\arraybackslash}p{6cm}|}
+\hline
+\textbf{Componente} & \textbf{Herramienta} & \textbf{Uso} \\
+\hline
+Base de datos & MongoDB 7.x & Almacenamiento NoSQL y consultas espaciales \\
+\hline
+Driver Python & PyMongo & Insercion y actualizacion de documentos \\
+\hline
+Procesamiento geoespacial & GeoPandas + Shapely & Lectura del shapefile y conversion a GeoJSON \\
+\hline
+Procesamiento tabular & Pandas & Lectura del Excel con municipios PDET \\
+\hline
+Control de versiones & GitHub & Seguimiento y entrega del proyecto \\
+\hline
+\end{longtable}
+
+\section{Proceso de integracion}
+
+El flujo de trabajo implementado en el script \texttt{load\_pdet\_municipalities.py} es el siguiente:
+
+\begin{enumerate}[leftmargin=*]
+    \item Cargar la lista de municipios PDET desde el archivo Excel.
+    \item Leer el shapefile oficial de municipios con GeoPandas.
+    \item Calcular el area de cada municipio en metros cuadrados usando un CRS metrico.
+    \item Reproyectar las geometrias a \texttt{EPSG:4326}, formato requerido por MongoDB para indices espaciales.
+    \item Construir el codigo \texttt{dane\_code} a partir del codigo del departamento y del municipio.
+    \item Filtrar unicamente los municipios cuyo codigo pertenezca a la lista PDET.
+    \item Convertir la geometria a GeoJSON compatible con MongoDB.
+    \item Insertar o actualizar los documentos en la coleccion \texttt{municipalities}.
+    \item Crear el indice espacial \texttt{2dsphere}.
+\end{enumerate}
+
+\section{Estructura del documento en MongoDB}
+
+Cada municipio se almacena en la coleccion \texttt{municipalities} con una estructura similar a la siguiente:
+
+\begin{lstlisting}[style=basicstyle,language={} ]
+{
+  "dane_code": "05001",
+  "name": "Municipio",
+  "department": "Departamento",
+  "is_pdet": true,
+  "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": []
+  },
+  "area_m2": 123456.78,
+  "source": "MGN2025",
+  "ingested_at": "ISODate"
+}
+\end{lstlisting}
+
+\section{Validaciones realizadas}
+
+\subsection{Data Acquisition \& Verification}
+
+\begin{itemize}[leftmargin=*]
+    \item El shapefile municipal corresponde a la fuente oficial DANE/MGN.
+    \item La lista de municipios PDET proviene del archivo oficial suministrado para el proyecto.
+    \item El filtrado se realiza mediante codigo DANE y no por seleccion manual.
+\end{itemize}
+
+\subsection{Data Integrity \& Format}
+
+\begin{itemize}[leftmargin=*]
+    \item El campo \texttt{dane\_code} se normaliza a 5 digitos.
+    \item El campo \texttt{is\_pdet} queda con valor \texttt{true}.
+    \item Las geometrias se almacenan como GeoJSON.
+    \item Las geometrias tipo \texttt{Polygon} se convierten a \texttt{MultiPolygon}.
+    \item El CRS final se unifica en \texttt{EPSG:4326}.
+    \item El area del municipio se guarda en el campo \texttt{area\_m2}.
+\end{itemize}
+
+\subsection{NoSQL Spatial Integration}
+
+\begin{itemize}[leftmargin=*]
+    \item Los municipios se almacenan en MongoDB dentro de la coleccion \texttt{municipalities}.
+    \item La geometria queda en el campo \texttt{geometry}.
+    \item La coleccion utiliza un indice espacial \texttt{2dsphere}.
+\end{itemize}
+
+\section{Ejecucion}
+
+Para ejecutar el proceso se requiere:
+
+\begin{enumerate}[leftmargin=*]
+    \item Iniciar MongoDB.
+    \item Instalar las dependencias de Python.
+    \item Ejecutar el script de ingesta.
+\end{enumerate}
+
+Comandos de referencia:
+
+\begin{lstlisting}[style=basicstyle,language=bash]
+docker run -d --name upme-mongo -p 27017:27017 mongo:7
+pip install pymongo geopandas shapely pandas openpyxl
+python load_pdet_municipalities.py
+\end{lstlisting}
+
+\section{Evidencia de ejecucion}
+
+Al ejecutar el proceso con los archivos reales, en esta seccion se deben registrar los resultados obtenidos:
+
+\begin{itemize}[leftmargin=*]
+    \item Total de municipios leidos desde el shapefile.
+    \item Total de codigos PDET leidos desde el Excel.
+    \item Total de municipios PDET encontrados en el shapefile.
+    \item Total de documentos almacenados en MongoDB.
+    \item Indices creados en la coleccion.
+    \item Documento de muestra insertado.
+\end{itemize}
+
+\section{Justificacion de MongoDB}
+
+MongoDB es adecuado para este proyecto porque ofrece soporte nativo para GeoJSON, permite crear indices espaciales \texttt{2dsphere} y facilita consultas geoespaciales posteriores como \texttt{geoIntersects}. Ademas, el modelo basado en documentos permite extender el proyecto en las siguientes semanas sin imponer un esquema rigido.
+
+\section{Trabajo futuro}
+
+En la semana 3 se integraran los datasets de edificios de Microsoft y Google. En la semana 4 se realizaran joins espaciales para contar edificios por municipio y calcular areas agregadas.
+
+\end{document}

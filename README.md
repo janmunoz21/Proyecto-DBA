@@ -1,314 +1,247 @@
 # Proyecto-DBA
-Documentación y desarrollo del proyecto para DBA
 
-# Entrega Semana 1 — Diseño del Esquema NoSQL y Plan de Implementación
+Documentacion y desarrollo del proyecto de bases de datos NoSQL con enfoque geoespacial.
 
-## 1. Plan de Implementación
+## Resumen del proyecto
 
-### Stack Tecnológico
+Este proyecto busca construir una base de datos NoSQL en MongoDB para analizar municipios PDET y, en semanas posteriores, cruzarlos con datasets de edificios.
 
-| Componente | Herramienta | Justificación |
-|---|---|---|
-| Motor NoSQL | **MongoDB 7.x** | Soporte nativo de GeoJSON, índices 2dsphere, aggregation pipeline |
-| Driver Python | **PyMongo / Motor** | Compatible con async, estándar para MongoDB |
-| Procesamiento geoespacial | **GeoPandas + Shapely** | Lectura de shapefiles (MGN), conversión a GeoJSON |
-| Entorno | **Docker** (imagen mongo:7) | Reproducibilidad del ambiente |
-| Control de versiones | **GitHub** | Requerido por el proyecto |
+La idea general es:
 
-### Cronograma por Semanas
+1. Disenar el esquema de la base de datos.
+2. Cargar los limites municipales oficiales de los territorios PDET.
+3. Cargar footprints de edificios de Microsoft y Google.
+4. Hacer joins espaciales para contar edificios por municipio y sumar areas.
+5. Entregar el informe final con resultados.
 
-| Semana | Tarea |
+## Cronograma
+
+| Semana | Objetivo |
 |---|---|
-| 1 | Diseño del esquema, configuración de MongoDB, creación de colecciones e índices |
-| 2 | Carga de límites municipales PDET (MGN/DANE) |
-| 3 | Carga de footprints de edificios: Microsoft + Google |
-| 4 | Joins espaciales: conteo de edificios y agregación de área por municipio |
-| 5 | Informe técnico final |
+| 1 | Diseno del esquema NoSQL y plan de implementacion |
+| 2 | Integracion de limites municipales PDET con fuente oficial DANE/MGN |
+| 3 | Carga de footprints de edificios |
+| 4 | Joins espaciales y agregaciones |
+| 5 | Informe tecnico final |
 
-### Configuración del Entorno
+## Entrega de semana 2
 
-```bash
-# Iniciar MongoDB con Docker
-docker run -d --name upme-mongo \
-  -p 27017:27017 \
-  -v $(pwd)/data:/data/db \
-  mongo:7
+La entrega de la semana 2 consiste en demostrar que el proyecto trabaja solamente con municipios PDET y que esos municipios fueron cargados usando limites oficiales DANE/MGN dentro de MongoDB.
 
-# Instalar dependencias Python
-pip install pymongo motor geopandas shapely pandas
-```
+### Lo que revisan
 
----
+- Data Acquisition & Verification
+- Data Integrity & Format
+- NoSQL Spatial Integration
+- Documentation of Process
 
-## 2. Modelado de Datos
+### Que significa eso en palabras simples
 
-El modelo se organiza alrededor de cuatro entidades principales:
+- **Adquisicion y verificacion de datos:** explicar de donde salieron los archivos y como se verifico que si corresponden a municipios PDET.
+- **Integridad y formato:** asegurar que los codigos DANE, nombres y geometrias quedaron consistentes.
+- **Integracion espacial NoSQL:** guardar los municipios en MongoDB como GeoJSON y crear el indice espacial `2dsphere`.
+- **Documentacion del proceso:** dejar claro que se hizo, con que archivos, con que script y que resultado se obtuvo.
 
-**Municipios PDET** — polígonos administrativos de DANE/MGN, filtrados a los territorios con estatus PDET. Un documento por municipio.
+## Estado actual del proyecto
 
-**Footprints Microsoft** — polígonos de edificios del dataset de Microsoft Global ML Building Footprints (formato GeoJSON). Un documento por edificio.
+Con lo que hay actualmente en el repositorio, ya esta adelantada la base tecnica de la semana 2:
 
-**Footprints Google** — polígonos de edificios de Google Open Buildings (geometría WKT `POLYGON`/`MULTIPOLYGON`, coordenadas en WGS84). Incluye score de confianza (característica propia de este dataset).
+- Existe un script de ingesta: [load_pdet_municipalities.py](C:\Users\Asus\Desktop\Proyecto-DBA\load_pdet_municipalities.py)
+- El script lee el shapefile municipal oficial.
+- El script lee la lista de municipios PDET desde un archivo Excel.
+- Se construye el codigo `dane_code` a partir del departamento y municipio.
+- Se filtran solo los municipios PDET.
+- Las geometrias se convierten a formato GeoJSON compatible con MongoDB.
+- Se reproyecta a `EPSG:4326`, requerido para indice `2dsphere`.
+- Los documentos se cargan en la coleccion `municipalities`.
+- Se crea el indice espacial.
+- Se imprime una verificacion basica al finalizar.
 
-**Resultados de Análisis** — conteos y áreas pre-agregadas por municipio y por dataset, para evitar re-ejecutar joins espaciales costosos.
+En resumen: la logica principal de semana 2 ya existe, pero todavia hace falta dejar mejor documentado el proceso y ejecutar la carga con los archivos reales para registrar evidencia.
 
-Todas las geometrías se almacenan como **GeoJSON** (`type: "MultiPolygon"`) en coordenadas **WGS84 (EPSG:4326)**, que es el único CRS compatible con los índices `2dsphere` de MongoDB. El área de cada edificio (`area_m2`) se almacena como atributo precalculado en metros cuadrados, aprovechando que ambas fuentes lo suministran directamente (`area_in_meters` en Google, calculado sobre WGS84 en Microsoft). Esto evita la necesidad de reprojectar geometrías para los cálculos de área.
+## Archivos esperados
 
----
+El script actual espera estos insumos:
 
-## 3. Diseño del Esquema
+- `MunicipiosPDET.xlsx`
+- `MGN_2025_COLOMBIA/ADMINISTRATIVO/MGN_ADM_MPIO_GRAFICO.shp`
 
-### Colección: `municipalities`
+Nota: el shapefile normalmente viene acompanado por archivos auxiliares como `.dbf`, `.shx`, `.prj` y otros. Todos deben mantenerse juntos en la misma carpeta.
+
+## Stack tecnologico
+
+| Componente | Herramienta | Uso en el proyecto |
+|---|---|---|
+| Base de datos | MongoDB 7.x | Almacenamiento NoSQL y consultas espaciales |
+| Driver Python | PyMongo | Insercion y actualizacion de documentos |
+| Procesamiento geoespacial | GeoPandas + Shapely | Lectura del shapefile y conversion a GeoJSON |
+| Procesamiento tabular | Pandas | Lectura del Excel con municipios PDET |
+| Versionamiento | GitHub | Entrega y seguimiento del proyecto |
+
+## Proceso de semana 2
+
+### 1. Cargar la lista oficial de municipios PDET
+
+El script lee el archivo Excel con los municipios PDET y toma la columna del codigo DANE del municipio. Luego completa con ceros a la izquierda para asegurar que todos queden en formato de 5 digitos.
+
+### 2. Leer el shapefile de municipios
+
+Se abre el shapefile oficial MGN/DANE con GeoPandas. Desde ahi se obtiene:
+
+- geometria del municipio,
+- nombre del municipio,
+- nombre del departamento,
+- codigo del departamento,
+- codigo del municipio.
+
+### 3. Calcular area del municipio
+
+El script calcula el area en metros cuadrados usando un CRS metrico (`EPSG:9377`) y luego guarda ese valor como `area_m2`.
+
+### 4. Reproyectar a WGS84
+
+MongoDB utiliza GeoJSON en coordenadas geograficas, por eso la geometria se transforma a `EPSG:4326`.
+
+### 5. Filtrar solo municipios PDET
+
+Se construye el `dane_code` con:
+
+- `dpto_ccdgo` con 2 digitos
+- `mpio_ccdgo` con 3 digitos
+
+Despues se conservan unicamente los municipios cuyo `dane_code` este en la lista PDET.
+
+### 6. Construir los documentos
+
+Cada municipio queda almacenado con esta estructura:
 
 ```json
 {
-  "_id": ObjectId,
-  "dane_code": "string",          // Código DIVIPOLA (ej. "05001")
-  "name": "string",               // Nombre del municipio
-  "department": "string",         // Nombre del departamento
-  "is_pdet": true,                // Siempre true tras el filtrado
-  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
+  "dane_code": "05001",
+  "name": "Municipio",
+  "department": "Departamento",
+  "is_pdet": true,
+  "geometry": {
     "type": "MultiPolygon",
-    "coordinates": [[[[lon, lat], "..."]]]
+    "coordinates": []
   },
-  "area_km2": 123.45,
+  "area_m2": 123456.78,
   "source": "MGN2025",
   "ingested_at": "ISODate"
 }
 ```
 
-**Índices:**
+### 7. Cargar a MongoDB
+
+La coleccion objetivo es `municipalities` dentro de la base `upme-project`.
+
+El script hace `upsert` por `dane_code`, lo cual evita insertar duplicados si se ejecuta varias veces.
+
+### 8. Crear indice espacial
+
+Se crea el indice:
+
 ```javascript
-// Solo el índice espacial es necesario; con ~170 municipios PDET
-// los escaneos de colección completa son triviales.
 db.municipalities.createIndex({ "geometry": "2dsphere" })
 ```
 
----
+Esto deja lista la coleccion para consultas y joins espaciales posteriores.
 
-### Colección: `buildings_microsoft`
+## Esquema de la coleccion `municipalities`
 
 ```json
 {
-  "_id": ObjectId,
-  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
+  "_id": "ObjectId",
+  "dane_code": "string",
+  "name": "string",
+  "department": "string",
+  "is_pdet": true,
+  "geometry": {
     "type": "MultiPolygon",
-    "coordinates": [[[[lon, lat], "..."]]]
+    "coordinates": [[[[0, 0]]]]
   },
-  "area_m2": 87.3,               // Suministrado por la fuente (precalculado sobre WGS84)
-  "municipality_code": "string", // Asignado mediante join espacial (Semana 4)
-  "source": "microsoft",
+  "area_m2": 123456.78,
+  "source": "MGN2025",
   "ingested_at": "ISODate"
 }
 ```
 
-**Índices:**
-```javascript
-db.buildings_microsoft.createIndex({ "geometry": "2dsphere" })
-db.buildings_microsoft.createIndex({ "municipality_code": 1 })
+## Como ejecutar
+
+### 1. Levantar MongoDB
+
+```bash
+docker run -d --name upme-mongo -p 27017:27017 mongo:7
 ```
 
----
+### 2. Instalar dependencias
 
-### Colección: `buildings_google`
-
-```json
-{
-  "_id": ObjectId,
-  "geometry": {                   // GeoJSON MultiPolygon, coordenadas WGS84 [lon, lat]
-    "type": "MultiPolygon",       // Fuente original: WKT POLYGON/MULTIPOLYGON → convertido a GeoJSON
-    "coordinates": [[[[lon, lat], "..."]]]
-  },
-  "area_m2": 64.1,               // Campo area_in_meters de la fuente (metros cuadrados)
-  "confidence": 0.87,            // Específico de Google: confianza de detección [0.65, 1.0]
-  "municipality_code": "string",
-  "source": "google",
-  "ingested_at": "ISODate"
-}
+```bash
+pip install pymongo geopandas shapely pandas openpyxl
 ```
 
-**Índices:**
-```javascript
-db.buildings_google.createIndex({ "geometry": "2dsphere" })
-db.buildings_google.createIndex({ "municipality_code": 1 })
-db.buildings_google.createIndex({ "confidence": 1 })
+### 3. Ejecutar la ingesta
+
+```bash
+python load_pdet_municipalities.py
 ```
 
----
+## Evidencia que debe quedar para la entrega
 
-### Colección: `analysis_results`
+Cuando ejecuten el script con los archivos reales, conviene registrar estos resultados en esta misma seccion:
 
-```json
-{
-  "_id": ObjectId,
-  "municipality_code": "string",
-  "municipality_name": "string",
-  "dataset": "microsoft | google",
-  "building_count": 1523,
-  "total_area_m2": 98432.5,
-  "avg_area_m2": 64.6,
-  "computed_at": "ISODate"
-}
-```
+- Total de municipios leidos desde el shapefile: `pendiente`
+- Total de codigos PDET en el Excel: `pendiente`
+- Total de municipios PDET encontrados en el shapefile: `pendiente`
+- Total de documentos en MongoDB al finalizar: `pendiente`
+- Indices creados: `pendiente`
+- Documento de muestra insertado: `pendiente`
 
-**Índices:**
-```javascript
-db.analysis_results.createIndex(
-  { "municipality_code": 1, "dataset": 1 },
-  { unique: true }
-)
-```
+Tambien sirve guardar una captura de:
 
----
+- la consola con la ejecucion exitosa,
+- la coleccion `municipalities` en MongoDB,
+- el indice `2dsphere` creado.
 
-## 4. Diagramas
+## Validaciones para semana 2
 
-### Diagrama 1 — Esquema de Documentos y Relaciones
+Estas son las validaciones que deben mencionar en la defensa:
 
-```mermaid
-erDiagram
-    MUNICIPALITIES {
-        ObjectId _id
-        string dane_code
-        string name
-        string department
-        bool is_pdet
-        GeoJSON_MultiPolygon geometry
-        float area_km2
-        string source
-        ISODate ingested_at
-    }
+### Data Acquisition & Verification
 
-    BUILDINGS_MICROSOFT {
-        ObjectId _id
-        GeoJSON_MultiPolygon geometry
-        float area_m2
-        string municipality_code
-        string source
-        ISODate ingested_at
-    }
+- El shapefile de municipios proviene de la fuente oficial MGN/DANE.
+- La lista de municipios PDET proviene del archivo oficial entregado o descargado para el proyecto.
+- El filtro se hace por codigo DANE, no manualmente.
 
-    BUILDINGS_GOOGLE {
-        ObjectId _id
-        GeoJSON_MultiPolygon geometry
-        float area_m2
-        float confidence
-        string municipality_code
-        string source
-        ISODate ingested_at
-    }
+### Data Integrity & Format
 
-    ANALYSIS_RESULTS {
-        ObjectId _id
-        string municipality_code
-        string municipality_name
-        string dataset
-        int building_count
-        float total_area_m2
-        float avg_area_m2
-        ISODate computed_at
-    }
+- El codigo `dane_code` queda con 5 digitos.
+- El atributo `is_pdet` queda en `true` para todos los documentos cargados.
+- Las geometrias quedan en formato GeoJSON.
+- Si la geometria original es `Polygon`, se convierte a `MultiPolygon`.
+- El CRS final queda en `EPSG:4326`.
+- El area se guarda de forma consistente como `area_m2`.
 
-    MUNICIPALITIES ||--o{ BUILDINGS_MICROSOFT : "dane_code → municipality_code"
-    MUNICIPALITIES ||--o{ BUILDINGS_GOOGLE : "dane_code → municipality_code"
-    MUNICIPALITIES ||--o{ ANALYSIS_RESULTS : "dane_code → municipality_code"
-```
+### NoSQL Spatial Integration
 
----
+- Los datos quedan cargados en MongoDB.
+- La geometria se almacena en el campo `geometry`.
+- La coleccion tiene indice `2dsphere`.
 
-### Diagrama 2 — Pipeline End-to-End
+### Documentation of Process
 
-```mermaid
-flowchart TD
-    A([Shapefile DANE/MGN]) --> B[GeoPandas: lectura y filtrado PDET]
-    B --> C[Conversión a GeoJSON MultiPolygon WGS84]
-    C --> D[(municipalities)]
+- El paso a paso esta descrito en este README.
+- El script principal del proceso queda versionado en el repositorio.
 
-    E([Microsoft Building Footprints\nGeoJSON — WGS84]) --> F[Parseo → MultiPolygon\narea_m2 desde fuente]
-    F --> G[(buildings_microsoft)]
+## Justificacion de MongoDB
 
-    H([Google Open Buildings\nCSV WKT POLYGON/MULTIPOLYGON]) --> I[WKT → GeoJSON MultiPolygon\narea_m2 = area_in_meters]
-    I --> J[(buildings_google)]
+MongoDB es una buena eleccion para este proyecto porque:
 
-    D --> K{Join Espacial\n$geoIntersects}
-    G --> K
-    J --> K
+- soporta GeoJSON de forma nativa,
+- permite crear indices espaciales `2dsphere`,
+- facilita futuras consultas con `geoIntersects`,
+- y encaja bien con un modelo flexible basado en documentos.
 
-    K --> L[Aggregation Pipeline\nconteo + suma de área en m²]
-    L --> M[(analysis_results)]
-    M --> N([Informe Final / Mapas])
+## Trabajo futuro
 
-    style D fill:#4DB6AC,color:#fff
-    style G fill:#4DB6AC,color:#fff
-    style J fill:#4DB6AC,color:#fff
-    style M fill:#4DB6AC,color:#fff
-```
-
----
-
-### Diagrama 3 — Estrategia de Índices
-
-```mermaid
-flowchart LR
-    subgraph municipalities
-        A1[2dsphere: geometry]
-        A2["— sin índices adicionales —\n~170 docs, escaneo trivial"]
-    end
-
-    subgraph buildings_microsoft
-        B1[2dsphere: geometry]
-        B2[municipality_code]
-    end
-
-    subgraph buildings_google
-        C1[2dsphere: geometry]
-        C2[municipality_code]
-        C3[confidence]
-    end
-
-    subgraph analysis_results
-        D1["unique: {municipality_code, dataset}"]
-    end
-
-    Q1([Consulta geoIntersects]) --> A1
-    Q1 --> B1
-    Q1 --> C1
-    Q3([Agregar por municipio]) --> B2
-    Q3 --> C2
-```
-
----
-
-### Diagrama 4 — Lógica del Join Espacial (preview Semana 4)
-
-```mermaid
-sequenceDiagram
-    participant Script
-    participant MongoDB
-
-    Script->>MongoDB: Obtener todos los municipios PDET (~170 docs)
-    MongoDB-->>Script: Lista de {dane_code, geometry: MultiPolygon}
-
-    loop Por cada municipio
-        Script->>MongoDB: buildings_microsoft.find({geometry: {$geoIntersects: muni.geometry}})
-        MongoDB-->>Script: edificios coincidentes[]
-        Script->>MongoDB: buildings_google.find({geometry: {$geoIntersects: muni.geometry}})
-        MongoDB-->>Script: edificios coincidentes[]
-        Script->>MongoDB: analysis_results.insertOne({conteo, area_total_m2, dataset})
-    end
-```
-
----
-
-## 5. Justificación de MongoDB
-
-MongoDB es la opción NoSQL más apropiada para este proyecto por tres razones concretas:
-
-Primero, soporta GeoJSON de forma nativa y los índices `2dsphere` permiten ejecutar operaciones espaciales directamente en la base de datos, sin necesidad de software GIS externo en la fase de análisis. MongoDB opera sobre WGS84 (EPSG:4326), que es el CRS nativo de ambas fuentes de datos, por lo que no se requiere reproyección para los joins espaciales.
-
-Segundo, su aggregation pipeline permite calcular conteos y sumas de área en una sola consulta, lo que es eficiente para los volúmenes de datos esperados (cientos de miles de edificios por municipio).
-
-Tercero, el esquema flexible de documentos facilita almacenar los campos propios de cada dataset (por ejemplo, `confidence` de Google) sin forzar un esquema rígido común, lo cual simplifica la integración de múltiples fuentes de datos abiertos.
-
-Alternativas como Apache Cassandra o Amazon DynamoDB no tienen soporte espacial nativo y requerirían procesamientos externos adicionales, contradiciendo el objetivo de simplicidad y reproducibilidad del proyecto.
-
+En la semana 3 se integraran los datasets de edificios de Microsoft y Google. En la semana 4 se haran joins espaciales para contar edificios y sumar areas dentro de cada municipio PDET.
