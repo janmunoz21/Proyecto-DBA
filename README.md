@@ -40,7 +40,7 @@ El objetivo es desarrollar una solución NoSQL escalable que permita:
 ### **Semana 1: Diseño del Esquema NoSQL y Plan de Implementación**
 Definición de la arquitectura de datos, configuración de MongoDB y creación del esquema de colecciones con índices geoespaciales.
 
-[Documentación completa](README_Semana_1.md)
+[Documentación completa](semana_1/README_Semana_1.md)
 
 **Logros principales:**
 - Diseño del modelo de datos (municipios, footprints)
@@ -113,7 +113,7 @@ git clone <repository-url>
 cd Proyecto-DBA
 
 # Instalar dependencias Python
-pip install pymongo motor geopandas shapely pandas
+pip install pymongo motor geopandas shapely pandas openpyxl requests
 
 # Iniciar MongoDB con Docker
 docker run -d --name upme-mongo \
@@ -122,7 +122,7 @@ docker run -d --name upme-mongo \
   mongo:7
 ```
 
-Para más detalles sobre configuración y diseño del esquema, consulta [README_Semana_1.md](README_Semana_1.md).
+Para más detalles sobre configuración y diseño del esquema, consulta [README_Semana_1.md](semana_1/README_Semana_1.md).
 
 ---
 

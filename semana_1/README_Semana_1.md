@@ -35,7 +35,7 @@ docker run -d --name upme-mongo \
   mongo:7
 
 # Instalar dependencias Python
-pip install pymongo motor geopandas shapely pandas
+pip install pymongo motor geopandas shapely pandas requests
 ```
 
 ---

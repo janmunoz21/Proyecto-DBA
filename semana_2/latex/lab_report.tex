@@ -1,0 +1,80 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% babel-spanish not available in this TeX installation
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{hyperref}
+
+\pgfplotsset{compat=1.18}
+
+\geometry{
+  top=2.5cm, bottom=2.5cm,
+  left=2.5cm, right=2.5cm
+}
+
+% Colors
+\definecolor{javblue}{RGB}{0,0,0}
+\definecolor{lightblue}{RGB}{208,228,247}
+\definecolor{rowgray}{RGB}{245,245,245}
+
+% Section formatting
+\titleformat{\section}{\large\bfseries\color{javblue}}{}{0em}{}[\color{javblue}\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{javblue}}{}{0em}{}
+\titlespacing{\section}{0pt}{14pt}{6pt}
+\titlespacing{\subsection}{0pt}{10pt}{4pt}
+
+% Header/footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{javblue}Laboratorio -- Rodar Sin Deslizar}
+\fancyhead[R]{\small\color{javblue}F\'isica Mec\'anica}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\hypersetup{colorlinks=true, linkcolor=javblue, urlcolor=javblue}
+
+% ────────────────────────────────────────────
+\begin{document}
+
+% ── PORTADA ──────────────────────────────────
+\thispagestyle{empty}
+\begin{center}
+
+  {\LARGE\bfseries\color{javblue} Laboratorio}\\[4pt]
+  {\Large Documentaci\'on Semana 2}\\[8pt]
+  %\rule{\linewidth}{1.5pt}\\[32pt]
+  
+   \begin{figure}[H]
+     \centering    
+     \includegraphics[width=0.5\linewidth]{Javeriana.svg.png}
+  \end{figure}
+
+
+  {\large Facultad de Ingenier\'ia --- Departamento de Ingenier\'ia de Sistemas}\\[2pt]
+  {\normalsize Administraci\'on de Bases de Datos}\\[24pt]
+  %\rule{\linewidth}{1.5pt}\\[8pt]
+
+  \begin{tabular}{rl}
+    \textbf{Presentado por:} & Valentina Garcia \\
+                              & Jan Muñoz \\
+                              & Nicolas Torres Roa \\
+                              & Ana Sofia Arboleda \\[12pt]
+
+  \end{tabular}
+\end{center}
+\newpage
+
+% ── INTRODUCCIÓN ─────────────────────────────

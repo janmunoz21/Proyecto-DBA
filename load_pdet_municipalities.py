@@ -84,5 +84,5 @@ def run_ingestion(shapefile_path: str):
     client.close()
     print("\nIngesta completada.")
 
-if __name__ == "__main__":
-    run_ingestion(SHP_PATH)
+#if __name__ == "__main__":
+#    run_ingestion(SHP_PATH)
