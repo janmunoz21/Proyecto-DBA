@@ -84,5 +84,63 @@ def run_ingestion(shapefile_path: str):
     client.close()
     print("\nIngesta completada.")
 
+
+def verify_pdet_municipalities():
+    """Verifica que todos los municipios PDET se cargaron correctamente en MongoDB."""
+    client = MongoClient(MONGO_URI)
+    col = client[DB_NAME][COL_NAME]
+    
+    print("\n" + "="*60)
+    print("VERIFICACION DE MUNICIPIOS PDET")
+    print("="*60 + "\n")
+    
+    # 1. Cargar códigos PDET desde Excel
+    print("1. Cargando lista PDET desde Excel...")
+    pdet_codes_excel = load_pdet_codes(PDET_XLSX)
+    total_excel = len(pdet_codes_excel)
+    print(f"   Total municipios PDET esperados: {total_excel}\n")
+    
+    # 2. Verificar en MongoDB
+    print("2. Verificando en MongoDB...")
+    total_mongo = col.count_documents({"is_pdet": True})
+    print(f"   Total municipios PDET en MongoDB: {total_mongo}\n")
+    
+    # 3. Obtener códigos en MongoDB
+    print("3. Comparando codigos...")
+    pdet_mongo = set(doc["dane_code"] for doc in col.find({"is_pdet": True}, {"dane_code": 1}))
+    
+    # 4. Verificar discrepancias
+    missing = pdet_codes_excel - pdet_mongo
+    extra = pdet_mongo - pdet_codes_excel
+    
+    if not missing and not extra and total_excel == total_mongo:
+        print(f"   Verificacion exitosa: todos los {total_excel} municipios PDET estan en MongoDB\n")
+        client.close()
+        return True
+    else:
+        print("   Se encontraron discrepancias:\n")
+        
+        if missing:
+            print(f"   - Municipios faltantes ({len(missing)}):")
+            for code in sorted(missing)[:10]:
+                print(f"     * {code}")
+            if len(missing) > 10:
+                print(f"     ... y {len(missing) - 10} mas\n")
+        
+        if extra:
+            print(f"   - Municipios extras ({len(extra)}):")
+            for code in sorted(extra)[:10]:
+                print(f"     * {code}")
+            if len(extra) > 10:
+                print(f"     ... y {len(extra) - 10} mas\n")
+        
+        print(f"   Resumen:")
+        print(f"   - Esperados: {total_excel}")
+        print(f"   - Encontrados: {total_mongo}")
+        print(f"   - Correctos: {total_excel - len(missing)}\n")
+        
+        client.close()
+        return False
+
 #if __name__ == "__main__":
 #    run_ingestion(SHP_PATH)
