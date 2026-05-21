@@ -7,9 +7,20 @@ import zipfile
 MGN_LINK = "https://geoportal.dane.gov.co/descargas/mgn_2025/MGN2025_00_COLOMBIA.zip"
 PDET_LINK = "https://centralpdet.renovacionterritorio.gov.co/wp-content/uploads/2022/01/MunicipiosPDET.xlsx"
 
+# Urls de edificios - TODO: verificar los links porque no estoy segura si están del todo bien
+MICROSOFT_BUILDINGS_LINK = "https://minedbuildings.blob.core.windows.net/colombia/Colombia.geojson"
+GOOGLE_BUILDINGS_LINK = "https://data.sourcecoop.io/google-open-buildings/v3/colombia.geojson"
+
+# mi opción B son estos links:
+# https://github.com/microsoft/GlobalMLBuildingFootprints
+# https://sites.research.google/open-buildings/?hl=es-419
+# https://sites.research.google/gr/open-buildings/
+
 # Rutas de archivos
 MGN_ZIP = "MGN2025_00_COLOMBIA.zip"
 PDET_FILE = "MunicipiosPDET.xlsx"
+MS_BUILDINGS_FILE = "buildings_microsoft.geojson"
+GOOG_BUILDINGS_FILE = "buildings_google.geojson"
 
 
 def file_exists(file_path: str) -> bool:
@@ -100,6 +111,37 @@ def check_and_download_files(shp_path: str) -> bool:
             files_ok = False
     
     return files_ok
+
+
+
+def check_and_download_buildings(dataset_type: str) -> str:
+    """Verifica y descarga específicamente los archivos de edificios de Microsoft o Google"""
+    if dataset_type == "microsoft":
+        url = MICROSOFT_BUILDINGS_LINK
+        filename = MS_BUILDINGS_FILE
+    else:
+        url = GOOGLE_BUILDINGS_LINK
+        filename = GOOG_BUILDINGS_FILE
+        
+    print(f"\n-> Verificando fuente de edificios: {filename}")
+    if file_exists(filename):
+        print(f"✓ Dataset de {dataset_type} ya se encuentra en el directorio local.")
+        return filename
+        
+    print(f"⚠ Dataset de {dataset_type} faltante.")
+    # Nota: los archivos pesan gigabytes en entornos reales
+    # Es por esto que se deja el flujo listo para descargar o mapear localmente de forma segura
+    confirm = input(f"¿Deseas intentar descargar el archivo remoto de {dataset_type}? (s/n): ").strip().lower()
+    if confirm == 's':
+        if download_file(url, filename):
+            return filename
+    
+    # Si no se descarga, se solicita la ruta local
+    local_path = input(f"Por favor ingresa la ruta local de tu archivo {dataset_type} (ej: data/{filename}): ").strip()
+    return local_path if file_exists(local_path) else ""
+
+
+
 
 
 def get_mongodb_config() -> str:
