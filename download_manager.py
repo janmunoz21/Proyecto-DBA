@@ -7,11 +7,11 @@ import zipfile
 MGN_LINK = "https://geoportal.dane.gov.co/descargas/mgn_2025/MGN2025_00_COLOMBIA.zip"
 PDET_LINK = "https://centralpdet.renovacionterritorio.gov.co/wp-content/uploads/2022/01/MunicipiosPDET.xlsx"
 
-# Urls de edificios - TODO: verificar los links porque no estoy segura si están del todo bien
+# Urls de edificios - TODO: hacer verificaciones de disponibilidad antes de ejecutar el proyecto
 MICROSOFT_BUILDINGS_LINK = "https://minedbuildings.blob.core.windows.net/colombia/Colombia.geojson"
 GOOGLE_BUILDINGS_LINK = "https://data.sourcecoop.io/google-open-buildings/v3/colombia.geojson"
 
-# mi opción B son estos links:
+# estos son los links oficiales, pero es para señalar en el mapa una ubicación especifica (pueden ser usados en el reporte de la semana)
 # https://github.com/microsoft/GlobalMLBuildingFootprints
 # https://sites.research.google/open-buildings/?hl=es-419
 # https://sites.research.google/gr/open-buildings/
