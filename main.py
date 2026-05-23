@@ -2,6 +2,7 @@ import sys
 import load_pdet_municipalities as loader
 import load_buildings as buildings_loader
 import download_manager as dm
+import eda_buildings as eda
 
 
 def show_menu() -> str:
@@ -11,13 +12,14 @@ def show_menu() -> str:
     print("="*60)
     print("\n1. Cargar datos en MongoDB")
     print("2. Verificar municipios PDET")
-    print("3. Ingestar huellas de edificios - MICROSOF")
+    print("3. Ingestar huellas de edificios - MICROSOFT")
     print("4. Ingestar huellas de edificios - GOOGLE")
-    print("5. Salir")
-    
+    print("5. EDA - Análisis exploratorio de edificios")
+    print("6. Salir")
+
     while True:
-        option = input("\nSelecciona una opcion (1-5): ").strip()
-        if option in ['1', '2', '3', '4', '5']:
+        option = input("\nSelecciona una opcion (1-6): ").strip()
+        if option in ['1', '2', '3', '4', '5', '6']:
             return option
         print("Por favor, selecciona una opcion valida")
 
@@ -74,6 +76,11 @@ if __name__ == "__main__":
                     print(" Archivo de Google no disponible para ejecucion\n")
             
             elif option == '5':
+                mongo_uri = dm.get_mongodb_config()
+                eda.MONGO_URI = mongo_uri
+                eda.run_eda()
+
+            elif option == '6':
                 print("Saliendo del sistema\n")
                 sys.exit(0)
     
