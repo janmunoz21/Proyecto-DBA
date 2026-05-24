@@ -31,21 +31,21 @@ def run_ingestion(shapefile_path: str):
     print(f"  Total municipios MGN : {len(gdf)}")
     print(f"  CRS original         : {gdf.crs}")
 
-    # 3. Calcular área en m² en CRS métrico oficial de Colombia
-    print("Calculando áreas en EPSG:9377 (Magnus)...")
-    gdf["area_m2"] = gdf.to_crs(epsg=9377).geometry.area
-
-    # 4. Reproyectar a WGS84 para MongoDB 2dsphere
-    if gdf.crs.to_epsg() != 4326:
-        gdf = gdf.to_crs(epsg=4326)
-
-    # 5. Construir código DIVIPOLA 5 dígitos y filtrar PDET
+    # 3. Construir código DIVIPOLA y filtrar PDET antes de proyectar
     gdf["dane_code"] = (
         gdf["dpto_ccdgo"].astype(str).str.zfill(2) +
         gdf["mpio_ccdgo"].astype(str).str.zfill(3)
     )
     gdf_pdet = gdf[gdf["dane_code"].isin(pdet_codes)].copy()
     print(f"  Municipios PDET encontrados en shapefile: {len(gdf_pdet)}")
+
+    # 4. Calcular área en m² solo sobre los 170 PDET
+    print("Calculando áreas en EPSG:9377 (Magnus)...")
+    gdf_pdet["area_m2"] = gdf_pdet.to_crs(epsg=9377).geometry.area
+
+    # 5. Reproyectar a WGS84 para MongoDB 2dsphere
+    if gdf_pdet.crs.to_epsg() != 4326:
+        gdf_pdet = gdf_pdet.to_crs(epsg=4326)
 
     # 6. Construir documentos
     records = []

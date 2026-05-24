@@ -62,20 +62,31 @@ Ingesta y transformación de datos de límites administrativos desde los shapefi
 ### **Semana 3: Carga de Footprints de Edificios**
 Integración de datos de footprints desde Microsoft Building Footprints y Google Open Buildings.
 
-**Objetivos:**
-- Descarga y procesamiento de datasets
-- Normalización de geometrías (coordenadas WGS84)
-- Carga en colecciones `buildings_microsoft` y `buildings_google`
+**Implementado:**
+- Descarga automatizada: 233 particiones Microsoft (GeoJSONL .csv.gz) y 3 tiles Google (WKT CSV)
+- Filtrado espacial: solo edificios dentro de municipios PDET (unión de geometrías)
+- Sanitización robusta de geometrías antes de insertar:
+  - `make_valid()` para reparar self-intersections y loops inválidos
+  - Extracción de Polygon/MultiPolygon desde GeometryCollections
+  - Normalización a MultiPolygon con orientación right-hand rule (`orient(sign=1.0)`)
+  - Geometrías irrecuperables se omiten sin romper la ingesta
+- Cálculo de `area_m2` en EPSG:9377 (MAGNA-SIRGAS / Colombia)
+- Progreso persistente por partición (reanudable ante fallos)
+- Opción de reparación y reindexación para colecciones ya contaminadas
+- Índice `2dsphere` creado al final con fallback de limpieza automática
 
 ---
 
 ### **Semana 4: Análisis Geoespacial y Agregaciones**
 Ejecución de joins espaciales y generación de métricas de conteo de edificios y área de techos por municipio.
 
-**Objetivos:**
-- Consultas geoespaciales: edificios dentro de límites municipales
-- Agregación de área total por municipio y fuente
-- Generación de resultados en colección `analysis_results`
+**Implementado:**
+- Consulta `$geoWithin` por cada municipio PDET contra cada dataset de edificios
+- Aggregation pipeline: `building_count`, `total_area_m2`, `avg_area_m2` por municipio
+- Persistencia en colección `analysis_results` con índice único `(municipality_code, dataset)`
+- Top 10 municipios por área de techos
+- Tabla comparativa Microsoft vs Google
+- Auditoría EDA completa: calidad de datos, distribución de áreas, confidence scores, índices
 
 ---
 
@@ -94,11 +105,15 @@ Consolidación de metodología, resultados y recomendaciones para identificar mu
 ```
 Proyecto-DBA/
 ├── README.md                    # Este archivo
-├── README_Semana_1.md           # Documentación detallada de Semana 1
+├── semana_1/README_Semana_1.md  # Documentación detallada de Semana 1
 ├── project.md                   # Enunciado del proyecto y requerimientos
 ├── Enunciado.pdf                # Especificaciones formales (PDF)
-├── load_pdet_municipalities.py  # Script para carga de datos
-└── .git/                         # Control de versiones
+├── main.py                      # Menú principal del pipeline
+├── download_manager.py          # Descarga y verificación de datasets
+├── load_pdet_municipalities.py  # Ingesta de municipios PDET (Semana 2)
+├── load_buildings.py            # Ingesta de edificios Microsoft/Google (Semana 3)
+├── eda_buildings.py             # EDA + análisis geoespacial (Semana 3-4)
+└── .git/                        # Control de versiones
 ```
 
 ---
@@ -113,14 +128,29 @@ git clone <repository-url>
 cd Proyecto-DBA
 
 # Instalar dependencias Python
-pip install pymongo motor geopandas shapely pandas openpyxl requests
+pip install pymongo geopandas shapely pandas openpyxl requests pyproj
 
 # Iniciar MongoDB con Docker
 docker run -d --name upme-mongo \
   -p 27017:27017 \
   -v $(pwd)/data:/data/db \
   mongo:7
+
+# Ejecutar el pipeline
+python main.py
 ```
+
+### Menú principal
+
+| Opción | Descripción |
+|--------|-------------|
+| 1 | Cargar municipios PDET en MongoDB (Semana 2) |
+| 2 | Verificar municipios PDET |
+| 3 | Ingestar huellas de edificios - Microsoft (Semana 3) |
+| 4 | Ingestar huellas de edificios - Google (Semana 3) |
+| 5 | Reparar y reindexar colecciones de edificios |
+| 6 | Análisis geoespacial por municipio (Semana 4) |
+| 7 | EDA - Auditoría exploratoria completa |
 
 Para más detalles sobre configuración y diseño del esquema, consulta [README_Semana_1.md](semana_1/README_Semana_1.md).
 
