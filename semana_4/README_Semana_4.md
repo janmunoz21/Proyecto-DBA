@@ -8,7 +8,7 @@ Esta entrega documenta el flujo reproducible que calcula, para cada municipio PD
 
 ## 2. Lo que pide la entrega de la semana 4
 
-Según [project.md](../project.md), la semana 4 debe incluir:
+La semana 4 debe incluir:
 
 - reproducibilidad y metodología;
 - precisión de las operaciones espaciales;
