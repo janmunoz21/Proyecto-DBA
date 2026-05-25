@@ -31,21 +31,21 @@ def run_ingestion(shapefile_path: str):
     print(f"  Total municipios MGN : {len(gdf)}")
     print(f"  CRS original         : {gdf.crs}")
 
-    # 3. Calcular área en m² en CRS métrico oficial de Colombia
-    print("Calculando áreas en EPSG:9377 (Magnus)...")
-    gdf["area_m2"] = gdf.to_crs(epsg=9377).geometry.area
-
-    # 4. Reproyectar a WGS84 para MongoDB 2dsphere
-    if gdf.crs.to_epsg() != 4326:
-        gdf = gdf.to_crs(epsg=4326)
-
-    # 5. Construir código DIVIPOLA 5 dígitos y filtrar PDET
+    # 3. Construir código DIVIPOLA y filtrar PDET antes de proyectar
     gdf["dane_code"] = (
         gdf["dpto_ccdgo"].astype(str).str.zfill(2) +
         gdf["mpio_ccdgo"].astype(str).str.zfill(3)
     )
     gdf_pdet = gdf[gdf["dane_code"].isin(pdet_codes)].copy()
     print(f"  Municipios PDET encontrados en shapefile: {len(gdf_pdet)}")
+
+    # 4. Calcular área en m² solo sobre los 170 PDET
+    print("Calculando áreas en EPSG:9377 (Magnus)...")
+    gdf_pdet["area_m2"] = gdf_pdet.to_crs(epsg=9377).geometry.area
+
+    # 5. Reproyectar a WGS84 para MongoDB 2dsphere
+    if gdf_pdet.crs.to_epsg() != 4326:
+        gdf_pdet = gdf_pdet.to_crs(epsg=4326)
 
     # 6. Construir documentos
     records = []
@@ -84,5 +84,63 @@ def run_ingestion(shapefile_path: str):
     client.close()
     print("\nIngesta completada.")
 
-if __name__ == "__main__":
-    run_ingestion(SHP_PATH)
+
+def verify_pdet_municipalities():
+    """Verifica que todos los municipios PDET se cargaron correctamente en MongoDB."""
+    client = MongoClient(MONGO_URI)
+    col = client[DB_NAME][COL_NAME]
+    
+    print("\n" + "="*60)
+    print("VERIFICACION DE MUNICIPIOS PDET")
+    print("="*60 + "\n")
+    
+    # 1. Cargar códigos PDET desde Excel
+    print("1. Cargando lista PDET desde Excel...")
+    pdet_codes_excel = load_pdet_codes(PDET_XLSX)
+    total_excel = len(pdet_codes_excel)
+    print(f"   Total municipios PDET esperados: {total_excel}\n")
+    
+    # 2. Verificar en MongoDB
+    print("2. Verificando en MongoDB...")
+    total_mongo = col.count_documents({"is_pdet": True})
+    print(f"   Total municipios PDET en MongoDB: {total_mongo}\n")
+    
+    # 3. Obtener códigos en MongoDB
+    print("3. Comparando codigos...")
+    pdet_mongo = set(doc["dane_code"] for doc in col.find({"is_pdet": True}, {"dane_code": 1}))
+    
+    # 4. Verificar discrepancias
+    missing = pdet_codes_excel - pdet_mongo
+    extra = pdet_mongo - pdet_codes_excel
+    
+    if not missing and not extra and total_excel == total_mongo:
+        print(f"   Verificacion exitosa: todos los {total_excel} municipios PDET estan en MongoDB\n")
+        client.close()
+        return True
+    else:
+        print("   Se encontraron discrepancias:\n")
+        
+        if missing:
+            print(f"   - Municipios faltantes ({len(missing)}):")
+            for code in sorted(missing)[:10]:
+                print(f"     * {code}")
+            if len(missing) > 10:
+                print(f"     ... y {len(missing) - 10} mas\n")
+        
+        if extra:
+            print(f"   - Municipios extras ({len(extra)}):")
+            for code in sorted(extra)[:10]:
+                print(f"     * {code}")
+            if len(extra) > 10:
+                print(f"     ... y {len(extra) - 10} mas\n")
+        
+        print(f"   Resumen:")
+        print(f"   - Esperados: {total_excel}")
+        print(f"   - Encontrados: {total_mongo}")
+        print(f"   - Correctos: {total_excel - len(missing)}\n")
+        
+        client.close()
+        return False
+
+#if __name__ == "__main__":
+#    run_ingestion(SHP_PATH)
