@@ -1,0 +1,360 @@
+\documentclass[12pt]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+}
+
+\lstdefinestyle{basicstyle}{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible
+}
+
+\title{Documentacion de la Entrega Semana 3\\Carga de Footprints de Edificios y Procedimientos de Administracion en MongoDB}
+\author{Proyecto-DBA}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Resumen}
+
+La entrega de la semana 3 corresponde a la integracion de huellas de edificios en MongoDB a partir de dos fuentes abiertas: Microsoft Building Footprints y Google Open Buildings. En esta version del proyecto ya se dispone de un flujo funcional para localizar el archivo fuente, leer la informacion geoespacial, transformarla a una estructura compatible con MongoDB y cargarla en colecciones separadas por dataset.
+
+Ademas del proceso de ingesta, esta etapa involucra procedimientos propios de administracion de bases de datos, especialmente en la preparacion de colecciones, normalizacion del modelo documental, indexacion geoespacial y control operativo del flujo de carga.
+
+\section{Objetivo de la semana 3}
+
+El objetivo es dejar almacenadas en MongoDB las huellas de edificios provenientes de Microsoft y Google, con geometria en formato GeoJSON y metadatos minimos que permitan su uso posterior en consultas espaciales, joins con municipios PDET y agregaciones territoriales.
+
+\section{Descripcion general de la arquitectura}
+
+El flujo implementado durante la semana 3 se apoya en tres modulos principales:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{main.py}: orquesta la ejecucion del sistema y presenta el menu principal al usuario.
+    \item \texttt{download\_manager.py}: verifica la disponibilidad de archivos locales y, si es necesario, permite descargar o registrar manualmente los datasets de edificios.
+    \item \texttt{load\_buildings.py}: realiza la lectura geoespacial, la transformacion al modelo documental y la carga final en MongoDB.
+\end{itemize}
+
+Desde la perspectiva de administracion de base de datos, el sistema separa los datos por fuente en colecciones independientes, lo que facilita la gestion de indices, la trazabilidad de la informacion y la futura comparacion entre datasets.
+
+\section{Flujo operativo del sistema}
+
+El procedimiento actual de ejecucion puede resumirse en los siguientes pasos:
+
+\begin{enumerate}[leftmargin=*]
+    \item El usuario ejecuta \texttt{python main.py}.
+    \item El sistema verifica que existan los archivos base del proyecto, incluyendo el Excel PDET y el shapefile municipal.
+    \item Desde el menu principal se selecciona la opcion de ingesta para Microsoft o Google.
+    \item El modulo \texttt{download\_manager.py} comprueba si el archivo del dataset existe localmente.
+    \item Si el archivo no esta disponible, el sistema ofrece intentar la descarga o pedir una ruta local.
+    \item Se solicita la configuracion de conexion a MongoDB.
+    \item Se confirma la ejecucion de la carga.
+    \item El script \texttt{load\_buildings.py} abre el archivo geoespacial con GeoPandas.
+    \item Se valida el sistema de coordenadas y se reproyecta a \texttt{EPSG:4326} cuando es necesario.
+    \item Se crea el indice geoespacial \texttt{2dsphere} en la coleccion correspondiente.
+    \item Se transforman las geometrias a GeoJSON y se construyen los documentos.
+    \item Los documentos se insertan de forma masiva en MongoDB.
+\end{enumerate}
+
+\section{Descripcion del codigo}
+
+\subsection{Menu principal y control de ejecucion}
+
+El archivo \texttt{main.py} centraliza la interaccion con el usuario. Su funcion es actuar como punto de entrada del sistema y enrutar cada opcion hacia el procedimiento adecuado. Para semana 3, las opciones relevantes son la 3 y la 4, correspondientes a la carga de huellas de edificios de Microsoft y Google.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+print("\n1. Cargar datos en MongoDB")
+print("2. Verificar municipios PDET")
+print("3. Ingestar huellas de edificios - MICROSOF")
+print("4. Ingestar huellas de edificios - GOOGLE")
+print("5. Salir")
+\end{lstlisting}
+
+Cuando el usuario elige una de estas opciones, el programa no carga directamente el dataset. Primero verifica el archivo fuente, obtiene la configuracion de MongoDB y pide confirmacion explicita antes de ejecutar la insercion. Ese comportamiento es importante desde la administracion operativa porque evita cargas accidentales y separa claramente la etapa de configuracion de la etapa de escritura sobre la base de datos.
+
+\subsection{Gestion y disponibilidad de archivos}
+
+El modulo \texttt{download\_manager.py} implementa funciones auxiliares para administracion de insumos. En el caso de los datasets de edificios, la funcion \texttt{check\_and\_download\_buildings(dataset\_type)} define la politica actual de disponibilidad del archivo.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+if dataset_type == "microsoft":
+    url = MICROSOFT_BUILDINGS_LINK
+    filename = MS_BUILDINGS_FILE
+else:
+    url = GOOGLE_BUILDINGS_LINK
+    filename = GOOG_BUILDINGS_FILE
+\end{lstlisting}
+
+El procedimiento asociado es:
+
+\begin{itemize}[leftmargin=*]
+    \item verificar si el archivo ya existe en el directorio local;
+    \item en caso negativo, ofrecer una descarga remota;
+    \item si no se descarga, solicitar manualmente una ruta local.
+\end{itemize}
+
+Este enfoque cumple una funcion administrativa importante: desacopla la logica de base de datos de la administracion fisica de archivos, lo cual permite usar datasets pesados sin obligar a mantenerlos siempre dentro del repositorio.
+
+\subsection{Conexion a MongoDB}
+
+La configuracion de conexion se realiza de manera interactiva. El sistema acepta una direccion IP personalizada o utiliza por defecto \texttt{mongodb://localhost:27017/}.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+if mongo_ip == "":
+    mongo_uri = "mongodb://localhost:27017/"
+else:
+    mongo_uri = f"mongodb://{mongo_ip}:27017/"
+\end{lstlisting}
+
+Desde la perspectiva DBA, esto permite ejecutar la misma aplicacion sobre una instancia local o una instancia remota sin modificar el codigo principal, lo cual es util para pruebas, validacion y futuras migraciones de ambiente.
+
+\subsection{Proceso de ingesta en MongoDB}
+
+La funcion principal de semana 3 es \texttt{run\_buildings\_ingestion(file\_path, dataset\_type)} definida en \texttt{load\_buildings.py}. Esta funcion abre una conexion con MongoDB, selecciona la base \texttt{upme-project} y dirige la carga a una coleccion dependiente de la fuente.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+col_name = f"buildings_{dataset_type}"
+collection = db[col_name]
+\end{lstlisting}
+
+Esto genera dos colecciones diferenciadas:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{buildings\_microsoft}
+    \item \texttt{buildings\_google}
+\end{itemize}
+
+La separacion por coleccion tiene varias ventajas administrativas:
+
+\begin{itemize}[leftmargin=*]
+    \item evita mezclar registros con estructuras distintas;
+    \item simplifica la trazabilidad del origen de los datos;
+    \item permite crear y ajustar indices de manera independiente;
+    \item facilita comparar calidad, volumen o cobertura entre fuentes.
+\end{itemize}
+
+\subsection{Lectura geoespacial y normalizacion}
+
+El archivo geoespacial es cargado con GeoPandas:
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+gdf = gpd.read_file(file_path)
+\end{lstlisting}
+
+Despues de la lectura, el sistema valida el CRS del dataset. Si no coincide con \texttt{EPSG:4326}, se hace reproyeccion a WGS84.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+if gdf.crs != "EPSG:4326":
+    gdf = gdf.to_crs(epsg=4326)
+\end{lstlisting}
+
+Esta operacion es clave desde la administracion espacial de MongoDB porque el indice \texttt{2dsphere} trabaja sobre geometria GeoJSON en coordenadas geograficas. Mantener un CRS consistente es un requisito para que las futuras consultas espaciales se comporten correctamente.
+
+\subsection{Transformacion al modelo documental}
+
+El sistema recorre cada fila del \texttt{GeoDataFrame}, descarta geometrias vacias y transforma el objeto geometrico de Shapely a una estructura compatible con GeoJSON.
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+geom = row['geometry']
+if geom is None or geom.is_empty:
+    continue
+
+doc = {
+    "geometry": geom.__geo_interface__,
+    "area_m2": round(float(area_m2), 2),
+    "dataset_source": dataset_type,
+    "ingested_at": datetime.now(timezone.utc)
+}
+\end{lstlisting}
+
+El modelo documental actual contiene:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{geometry}: geometria del edificio en formato GeoJSON.
+    \item \texttt{area\_m2}: area estimada del footprint.
+    \item \texttt{dataset\_source}: identificador de la fuente.
+    \item \texttt{ingested\_at}: fecha y hora de insercion en UTC.
+\end{itemize}
+
+Para Google se incorpora un campo adicional:
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+if dataset_type == "google" and "confidence" in row:
+    doc["confidence_score"] = float(row["confidence"])
+\end{lstlisting}
+
+Esto demuestra un rasgo importante del modelo NoSQL utilizado: el esquema es flexible y permite almacenar atributos propios de una fuente sin obligar a que todos los documentos tengan exactamente la misma estructura.
+
+\section{Procedimientos de administracion en base de datos}
+
+\subsection{Creacion de colecciones por dominio}
+
+El sistema no crea manualmente las colecciones mediante comandos administrativos previos; en su lugar, MongoDB las materializa automaticamente cuando se inserta el primer documento. Aun asi, el diseño logico de administracion ya esta definido en el codigo:
+
+\begin{itemize}[leftmargin=*]
+    \item la base de datos operativa es \texttt{upme-project};
+    \item cada fuente de edificios tiene su propia coleccion;
+    \item la separacion evita conflictos entre estructuras heterogeneas.
+\end{itemize}
+
+Este criterio facilita la administracion de almacenamiento y el control de operaciones futuras, como respaldos selectivos, consultas por fuente y mantenimiento de indices independientes.
+
+\subsection{Indexacion geoespacial}
+
+Uno de los procedimientos mas importantes de administracion implementados en esta semana es la creacion preventiva del indice geoespacial. La funcion \texttt{ensure\_spatial\_indexes} ejecuta:
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+db[col_name].create_index([("geometry", GEOSPHERE)])
+\end{lstlisting}
+
+Este indice corresponde al tipo \texttt{2dsphere} de MongoDB y permite:
+
+\begin{itemize}[leftmargin=*]
+    \item realizar consultas de interseccion espacial;
+    \item soportar operadores como \texttt{\$geoIntersects}, \texttt{\$near} y \texttt{\$geoWithin};
+    \item optimizar el costo de consultas sobre geometrias complejas.
+\end{itemize}
+
+Desde una perspectiva DBA, crear el indice antes o durante la carga asegura que la coleccion quede preparada para la siguiente fase del proyecto, en la cual se realizaran joins espaciales entre edificios y municipios PDET.
+
+\subsection{Normalizacion espacial para compatibilidad con el indice}
+
+La indexacion geoespacial por si sola no es suficiente. Para que el indice funcione correctamente, los documentos deben cumplir reglas minimas de integridad espacial:
+
+\begin{itemize}[leftmargin=*]
+    \item la geometria debe almacenarse como GeoJSON;
+    \item las coordenadas deben estar en WGS84;
+    \item las geometrias vacias no deben insertarse.
+\end{itemize}
+
+El codigo actual ya aplica estas tres decisiones durante la ingesta. Por tanto, la administracion espacial de la base no se limita a crear indices, sino que empieza desde la preparacion de los datos antes de insertarlos.
+
+\subsection{Insercion masiva de documentos}
+
+Una vez transformados los registros, el sistema ejecuta una insercion masiva:
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+collection.insert_many(documents)
+\end{lstlisting}
+
+Desde el punto de vista administrativo, esta decision busca reducir el costo de operaciones de escritura individuales y mejorar el rendimiento frente a cargas de mayor volumen. En lugar de insertar un documento por vez, la aplicacion agrupa todos los registros construidos y los envia en una sola operacion logica a MongoDB.
+
+\subsection{Trazabilidad temporal}
+
+Cada documento incluye el campo \texttt{ingested\_at}, calculado con fecha y hora UTC:
+
+\begin{lstlisting}[style=basicstyle,language=Python]
+"ingested_at": datetime.now(timezone.utc)
+\end{lstlisting}
+
+Este atributo cumple una funcion de auditoria basica. Permite identificar cuando fue insertado cada registro y facilita futuras tareas administrativas como validacion de cargas, control de versiones del dataset o comparacion entre distintas ejecuciones.
+
+\subsection{Aislamiento logico por fuente}
+
+El atributo \texttt{dataset\_source} no solo documenta el origen del registro, sino que tambien apoya procedimientos administrativos y analiticos. Gracias a este campo es posible:
+
+\begin{itemize}[leftmargin=*]
+    \item confirmar el origen del documento sin depender unicamente del nombre de la coleccion;
+    \item realizar filtros o agregaciones por proveedor del dataset;
+    \item facilitar futuras consolidaciones si en algun momento se decide unificar ambas fuentes en una misma coleccion.
+\end{itemize}
+
+\section{Modelo de datos almacenado}
+
+\subsection{Coleccion \texttt{buildings\_microsoft}}
+
+\begin{lstlisting}[style=basicstyle,language={} ]
+{
+  "geometry": {
+    "type": "Polygon o MultiPolygon",
+    "coordinates": []
+  },
+  "area_m2": 123.45,
+  "dataset_source": "microsoft",
+  "ingested_at": "ISODate"
+}
+\end{lstlisting}
+
+\subsection{Coleccion \texttt{buildings\_google}}
+
+\begin{lstlisting}[style=basicstyle,language={} ]
+{
+  "geometry": {
+    "type": "Polygon o MultiPolygon",
+    "coordinates": []
+  },
+  "area_m2": 123.45,
+  "dataset_source": "google",
+  "confidence_score": 0.91,
+  "ingested_at": "ISODate"
+}
+\end{lstlisting}
+
+\section{Comandos y procedimientos operativos}
+
+\subsection{Ejecucion de la aplicacion}
+
+\begin{lstlisting}[style=basicstyle,language=bash]
+pip install pymongo geopandas shapely pandas requests
+python main.py
+\end{lstlisting}
+
+\subsection{Secuencia operativa para la carga}
+
+\begin{enumerate}[leftmargin=*]
+    \item ejecutar el programa principal;
+    \item seleccionar la opcion 3 o 4 en el menu;
+    \item verificar la disponibilidad del archivo fuente;
+    \item configurar la direccion de MongoDB;
+    \item confirmar la carga;
+    \item esperar la insercion masiva en la coleccion correspondiente.
+\end{enumerate}
+
+\subsection{Resultado esperado en MongoDB}
+
+Al finalizar el procedimiento, la base de datos debe contener:
+
+\begin{itemize}[leftmargin=*]
+    \item una coleccion \texttt{buildings\_microsoft} o \texttt{buildings\_google} con footprints cargados;
+    \item un indice geoespacial \texttt{2dsphere} sobre el campo \texttt{geometry};
+    \item documentos con sello temporal de ingesta y marca de fuente.
+\end{itemize}
+
+\section{Aporte de la semana 3 a la administracion del proyecto}
+
+Desde el enfoque de administracion de bases de datos, la semana 3 no solo agrega datos de edificios. Tambien deja preparada la estructura operativa necesaria para la siguiente fase del proyecto:
+
+\begin{itemize}[leftmargin=*]
+    \item colecciones organizadas por dominio de informacion;
+    \item geometrias compatibles con consultas espaciales;
+    \item indices creados para acelerar operaciones posteriores;
+    \item base documental flexible para integrar atributos diferenciados;
+    \item procedimiento reproducible de carga en MongoDB.
+\end{itemize}
+
+\section{Conclusion}
+
+La entrega de la semana 3 deja implementado un procedimiento completo de carga de footprints en MongoDB y documenta las tareas administrativas asociadas al almacenamiento geoespacial. El sistema ya contempla decisiones importantes de administracion de base de datos, como la separacion por colecciones, la normalizacion espacial, la indexacion \texttt{2dsphere}, la insercion masiva y la trazabilidad temporal de los registros.
+
+Con esta base, la informacion de edificios queda preparada para ser utilizada en la semana 4, donde se ejecutaran consultas espaciales y procesos de agregacion sobre municipios PDET.
+
+\end{document}
