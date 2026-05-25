@@ -15,7 +15,7 @@ from pyproj import Geod
 
 CHUNK_SIZE = 10_000
 MS_STREAM_CHUNK = 15_000
-GOOGLE_STREAM_CHUNK = 200_000
+GOOGLE_STREAM_CHUNK = 15_000
 
 _GEOD = Geod(ellps="WGS84")
 
@@ -89,9 +89,10 @@ def _load_pdet_filter():
     """
     _check_mongo_connection(MONGO_URI)
     client = MongoClient(MONGO_URI)
-    docs = list(client[DB_NAME]["municipalities"].find(
+    cursor = client[DB_NAME]["municipalities"].find(
         {"is_pdet": True}, {"geometry": 1, "_id": 0}
-    ))
+    ).batch_size(20)
+    docs = list(cursor)
     client.close()
 
     if not docs:
@@ -263,19 +264,37 @@ def _partition_intersects_pdet(fp: str, pdet_bbox) -> bool:
 # Google tile streaming
 # ═══════════════════════════════════════════════════════════════
 
-def _iter_google_tile(fp: str, chunksize: int = GOOGLE_STREAM_CHUNK):
-    """Itera sobre un tile de Google en chunks."""
+def _iter_google_tile(fp: str, chunksize: int = GOOGLE_STREAM_CHUNK, pdet_bounds=None):
+    """
+    Itera sobre un tile de Google en chunks desde archivo local.
+    Aplica prefiltro por lat/lon ANTES de parsear WKT (ahorro masivo de CPU/RAM).
+    """
     from shapely import from_wkt
 
-    compression = "gzip" if fp.endswith(".gz") else None
-    usecols = lambda c: c in ("geometry", "confidence", "area_in_meters")
-    reader = pd.read_csv(fp, compression=compression, chunksize=chunksize, usecols=usecols)
+    usecols = lambda c: c in ("geometry", "confidence", "area_in_meters", "latitude", "longitude")
+    with gzip.open(fp, "rt", encoding="utf-8") as gz:
+        reader = pd.read_csv(gz, chunksize=chunksize, usecols=usecols)
+        for df_chunk in reader:
+            if "geometry" not in df_chunk.columns:
+                raise ValueError(f"El tile Google no contiene columna 'geometry': {fp}")
 
-    for df_chunk in reader:
-        if "geometry" not in df_chunk.columns:
-            raise ValueError(f"El tile Google no contiene columna 'geometry': {fp}")
-        geometries = from_wkt(df_chunk["geometry"].values)
-        yield gpd.GeoDataFrame(df_chunk, geometry=geometries, crs="EPSG:4326")
+            # Prefiltro por lat/lon antes de crear objetos Shapely
+            if pdet_bounds is not None and "latitude" in df_chunk.columns:
+                minx, miny, maxx, maxy = pdet_bounds
+                mask = (
+                    (df_chunk["longitude"] >= minx) & (df_chunk["longitude"] <= maxx) &
+                    (df_chunk["latitude"]  >= miny) & (df_chunk["latitude"]  <= maxy)
+                )
+                df_chunk = df_chunk[mask]
+                if df_chunk.empty:
+                    continue
+
+            geometries = from_wkt(df_chunk["geometry"].values)
+            df_chunk = df_chunk.drop(columns=["geometry", "latitude", "longitude"], errors="ignore")
+            gdf = gpd.GeoDataFrame(df_chunk, geometry=geometries, crs="EPSG:4326")
+            valid_mask = ~gdf.geometry.isna()
+            if valid_mask.any():
+                yield gdf[valid_mask].reset_index(drop=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -626,15 +645,15 @@ def run_buildings_ingestion(file_path: str, dataset_type: str):
             name = os.path.basename(fp)
             tile_rows = 0
             tile_ins = 0
-            chunk_num = 0
-            for gdf_chunk in _iter_google_tile(fp):
-                chunk_num += 1
+            print(f"  [{skipped_done + i}/{total_files}] {name} ...", flush=True)
+            for gdf_chunk in _iter_google_tile(fp, pdet_bounds=pdet_bbox.bounds):
                 n = _ingest_gdf(gdf_chunk, collection, dataset_type, now,
                                 pdet_tree, pdet_bbox)
                 tile_rows += len(gdf_chunk)
                 tile_ins += n
                 inserted += n
                 del gdf_chunk
+            import gc; gc.collect()
             done.add(name)
             _save_progress(dataset_type, done)
             print(f"  [{skipped_done + i}/{total_files}] {name} "

@@ -5,5 +5,7 @@ MGN_2025_COLOMBIA/
 MunicipiosPDET.xlsx
 __pycache__/
 microsoft_buildings_progress.json
+google_buildings_progress.json
 ms_buildings/
+google_buildings/
 data/

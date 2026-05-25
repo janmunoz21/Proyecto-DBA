@@ -1,13 +1,24 @@
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+import numpy as np
+import pandas as pd
+import geopandas as gpd
 from pymongo import MongoClient
+from shapely.geometry import shape
 
 MONGO_URI = "mongodb://localhost:27017/"
 DB_NAME   = "upme-project"
 RESULTS_COLLECTION = "analysis_results"
 
 DATASETS = ["microsoft", "google"]
+MAPS_DIR = Path("semana_4") / "maps"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -39,6 +50,110 @@ def _google_confidence_field(col) -> str | None:
     if col.count_documents({"confidence": {"$exists": True, "$ne": None}}) > 0:
         return "confidence"
     return None
+
+
+def _municipality_results_gdf(db, dataset: str) -> gpd.GeoDataFrame:
+    """Une geometrías municipales con resultados agregados para un dataset."""
+    muni_docs = list(db["municipalities"].find(
+        {"is_pdet": True},
+        {"_id": 0, "dane_code": 1, "name": 1, "department": 1, "geometry": 1, "area_m2": 1}
+    ))
+    if not muni_docs:
+        return gpd.GeoDataFrame(columns=["dane_code", "name", "department", "geometry", "area_m2", "building_count", "total_area_m2", "avg_area_m2"], geometry="geometry", crs="EPSG:4326")
+
+    muni_df = pd.DataFrame(muni_docs)
+    muni_df["geometry"] = muni_df["geometry"].apply(shape)
+    muni_gdf = gpd.GeoDataFrame(muni_df, geometry="geometry", crs="EPSG:4326")
+
+    records = list(db[RESULTS_COLLECTION].find({"dataset": dataset}, {"_id": 0}))
+    results_df = pd.DataFrame(records)
+    if results_df is None or results_df.empty:
+        muni_gdf["building_count"] = 0
+        muni_gdf["total_area_m2"] = 0.0
+        muni_gdf["avg_area_m2"] = 0.0
+        return muni_gdf
+
+    merged = muni_gdf.merge(results_df, left_on="dane_code", right_on="municipality_code", how="left")
+    merged["building_count"] = merged["building_count"].fillna(0)
+    merged["total_area_m2"] = merged["total_area_m2"].fillna(0)
+    merged["avg_area_m2"] = merged["avg_area_m2"].fillna(0)
+    return gpd.GeoDataFrame(merged, geometry="geometry", crs="EPSG:4326")
+
+
+def _plot_dataset_map(ax, gdf: gpd.GeoDataFrame, column: str, title: str, cmap: str, norm):
+    """Dibuja un mapa municipal simple con una variable cuantitativa."""
+    if gdf.empty:
+        ax.set_axis_off()
+        ax.set_title(f"{title}\nSin datos")
+        return
+
+    gdf.plot(
+        ax=ax,
+        column=column,
+        cmap=cmap,
+        norm=norm,
+        linewidth=0.2,
+        edgecolor="#3a3a3a",
+        missing_kwds={"color": "#f0f0f0", "label": "Sin datos"},
+    )
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_axis_off()
+
+
+def generate_week4_maps(db, output_dir: Path | None = None) -> list[Path]:
+    """Genera mapas PNG de la semana 4 para área total y conteo de edificios."""
+    output_dir = output_dir or MAPS_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    generated_files: list[Path] = []
+
+    map_specs = [
+        ("total_area_m2", "Área total de techos por municipio", "YlOrRd", "Área total (m²)", "week4_area_maps.png"),
+        ("building_count", "Conteo de huellas por municipio", "PuBuGn", "Cantidad de edificios", "week4_count_maps.png"),
+    ]
+
+    for column, figure_title, cmap, colorbar_label, filename in map_specs:
+        microsoft_gdf = _municipality_results_gdf(db, "microsoft")
+        google_gdf = _municipality_results_gdf(db, "google")
+
+        combined = np.concatenate([
+            microsoft_gdf[column].fillna(0).to_numpy(dtype=float),
+            google_gdf[column].fillna(0).to_numpy(dtype=float),
+        ]) if not microsoft_gdf.empty and not google_gdf.empty else np.array([0.0])
+
+        vmax = float(np.nanmax(combined)) if combined.size else 1.0
+        if vmax <= 0:
+            vmax = 1.0
+        norm = Normalize(vmin=0.0, vmax=vmax)
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 8), constrained_layout=True)
+        fig.suptitle(f"Semana 4 - {figure_title}", fontsize=16, fontweight="bold", color="#1f1f1f")
+
+        _plot_dataset_map(axes[0], microsoft_gdf, column, "Microsoft Building Footprints", cmap, norm)
+        _plot_dataset_map(axes[1], google_gdf, column, "Google Open Buildings", cmap, norm)
+
+        sm = ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=axes, shrink=0.82, pad=0.02)
+        cbar.set_label(colorbar_label)
+
+        for ax in axes:
+            ax.text(
+                0.02,
+                0.02,
+                "PDET municipios",
+                transform=ax.transAxes,
+                fontsize=9,
+                color="#444444",
+                bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none", "pad": 2},
+            )
+
+        out_fp = output_dir / filename
+        fig.savefig(out_fp, dpi=220, bbox_inches="tight")
+        plt.close(fig)
+        generated_files.append(out_fp)
+
+    return generated_files
 
 
 # ──────────────────────────────────────────────────────────────
@@ -283,7 +398,15 @@ def _aggregate_municipality_for_dataset(db, municipality: dict, dataset: str) ->
 
 def run_spatial_analysis(db):
     """Calcula y persiste conteos y áreas por municipio para cada dataset."""
-    municipalities = list(db["municipalities"].find({"is_pdet": True}, {"_id": 0}))
+    # Cargar municipios uno por uno para evitar InvalidBSON con geometrías pesadas
+    dane_codes = [d["dane_code"] for d in db["municipalities"].find(
+        {"is_pdet": True}, {"dane_code": 1, "_id": 0}
+    )]
+    municipalities = []
+    for code in dane_codes:
+        doc = db["municipalities"].find_one({"dane_code": code}, {"_id": 0})
+        if doc:
+            municipalities.append(doc)
     if not municipalities:
         print("\nNo hay municipios PDET cargados; se omite el analisis geoespacial.")
         return []
@@ -298,8 +421,22 @@ def run_spatial_analysis(db):
     inserted = []
     for dataset in DATASETS:
         print(f"\n  Procesando dataset: {dataset.upper()}")
+
+        already_done = set()
+        for doc in results_col.find({"dataset": dataset}, {"municipality_code": 1, "_id": 0}):
+            already_done.add(doc["municipality_code"])
+
+        pending = [m for m in municipalities if m["dane_code"] not in already_done]
+        total = len(municipalities)
+        done_count = total - len(pending)
+
+        if already_done:
+            print(f"    {done_count}/{total} ya calculados, {len(pending)} pendientes.")
+
         dataset_results = []
-        for municipality in municipalities:
+        for i, municipality in enumerate(pending, done_count + 1):
+            name = municipality.get("name", municipality["dane_code"])
+            print(f"    [{i}/{total}] {name}...", end=" ", flush=True)
             doc = _aggregate_municipality_for_dataset(db, municipality, dataset)
             results_col.update_one(
                 {"municipality_code": doc["municipality_code"], "dataset": doc["dataset"]},
@@ -308,10 +445,12 @@ def run_spatial_analysis(db):
             )
             dataset_results.append(doc)
             inserted.append(doc)
+            print(f"{doc['building_count']:,} edif, {doc['total_area_m2']:,.0f} m2")
 
-        total_buildings = sum(item["building_count"] for item in dataset_results)
-        total_area = sum(item["total_area_m2"] for item in dataset_results)
-        print(f"    Municipios procesados : {len(dataset_results):,}")
+        all_results = list(results_col.find({"dataset": dataset}))
+        total_buildings = sum(item.get("building_count", 0) for item in all_results)
+        total_area = sum(item.get("total_area_m2", 0) for item in all_results)
+        print(f"    Municipios procesados : {total:,}")
         print(f"    Edificios totales     : {total_buildings:,}")
         print(f"    Area total acumulada  : {total_area:,.2f} m2")
 
@@ -422,6 +561,11 @@ def run_spatial_analysis_standalone():
 
     run_spatial_analysis(db)
     print_top_municipalities(db)
+    generated_maps = generate_week4_maps(db)
+    if generated_maps:
+        print("\n  Mapas generados:")
+        for map_file in generated_maps:
+            print(f"    - {map_file}")
 
     print(f"\n{'='*60}")
     print(" Analisis geoespacial completado.")

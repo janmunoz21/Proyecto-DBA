@@ -3,6 +3,7 @@ import argparse
 import requests
 import zipfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # URLs de descarga
@@ -15,10 +16,32 @@ MS_BUILDINGS_INDEX = "https://minedbuildings.z5.web.core.windows.net/global-buil
 MS_BUILDINGS_DIR   = "ms_buildings"
 
 # Google Open Buildings v3 — tiles S2 nivel 4 que cubren Colombia
+# Tokens calculados con s2sphere para bbox Colombia: lat -5..13, lon -82..-66
 # Acceso público directo desde Google Cloud Storage
 # Referencia: https://sites.research.google/gr/open-buildings/
 GOOGLE_BUILDINGS_BASE = "https://storage.googleapis.com/open-buildings-data/v3/polygons_s2_level_4_gzip"
-GOOGLE_BUILDINGS_TILES = ["177_buildings.csv.gz", "179_buildings.csv.gz", "17b_buildings.csv.gz"]
+GOOGLE_BUILDINGS_TILES = [
+    "8c3_buildings.csv.gz",
+    "8dd_buildings.csv.gz",
+    "8df_buildings.csv.gz",
+    "8e1_buildings.csv.gz",
+    "8e3_buildings.csv.gz",
+    "8e5_buildings.csv.gz",
+    "8e7_buildings.csv.gz",
+    "8e9_buildings.csv.gz",
+    "8ef_buildings.csv.gz",
+    "8f1_buildings.csv.gz",
+    "8fb_buildings.csv.gz",
+    "8fd_buildings.csv.gz",
+    "903_buildings.csv.gz",
+    "905_buildings.csv.gz",
+    "919_buildings.csv.gz",
+    "91b_buildings.csv.gz",
+    "91d_buildings.csv.gz",
+    "91f_buildings.csv.gz",
+    "921_buildings.csv.gz",
+    "923_buildings.csv.gz",
+]
 GOOGLE_BUILDINGS_DIR   = "google_buildings"
 
 # Rutas de archivos
@@ -253,27 +276,41 @@ def check_and_download_buildings(dataset_type: str) -> str:
         print(f"\n-> Verificando dataset Google Open Buildings en '{GOOGLE_BUILDINGS_DIR}/'")
         os.makedirs(GOOGLE_BUILDINGS_DIR, exist_ok=True)
 
-        existing = [f for f in os.listdir(GOOGLE_BUILDINGS_DIR) if f.endswith(".csv.gz")]
-        if len(existing) == len(GOOGLE_BUILDINGS_TILES):
-            print(f"  {len(existing)} tiles ya descargados en '{GOOGLE_BUILDINGS_DIR}/'.")
+        existing = {f for f in os.listdir(GOOGLE_BUILDINGS_DIR) if f.endswith(".csv.gz")}
+        pending = [t for t in GOOGLE_BUILDINGS_TILES if t not in existing]
+
+        if not pending:
+            print(f"  {len(GOOGLE_BUILDINGS_TILES)} tiles ya descargados en '{GOOGLE_BUILDINGS_DIR}/'.")
             return GOOGLE_BUILDINGS_DIR
 
-        pending = [t for t in GOOGLE_BUILDINGS_TILES
-                   if not file_exists(os.path.join(GOOGLE_BUILDINGS_DIR, t))]
-        print(f"  {len(pending)} tiles pendientes de {len(GOOGLE_BUILDINGS_TILES)} (~3.5 GB total).")
+        total_ok = len(GOOGLE_BUILDINGS_TILES) - len(pending)
+        print(f"  {len(pending)} tiles pendientes (~5 GB comprimido, descarga en paralelo).")
         confirm = input("¿Deseas descargarlos ahora? (s/n): ").strip().lower()
-        if confirm == 's':
-            ok = 0
-            for tile in pending:
-                url  = f"{GOOGLE_BUILDINGS_BASE}/{tile}"
-                dest = os.path.join(GOOGLE_BUILDINGS_DIR, tile)
-                if download_file(url, dest):
-                    ok += 1
-            print(f"\nGoogle: {ok + (len(GOOGLE_BUILDINGS_TILES) - len(pending))}/{len(GOOGLE_BUILDINGS_TILES)} tiles disponibles.")
-            return GOOGLE_BUILDINGS_DIR if ok > 0 else ""
+        if confirm != 's':
+            local_path = input("Ingresa la ruta a la carpeta con los tiles .csv.gz: ").strip()
+            return local_path if os.path.isdir(local_path) else ""
 
-        local_path = input("Ingresa la ruta a la carpeta con los tiles .csv.gz: ").strip()
-        return local_path if os.path.isdir(local_path) else ""
+        def _download_tile(tile):
+            url  = f"{GOOGLE_BUILDINGS_BASE}/{tile}"
+            dest = os.path.join(GOOGLE_BUILDINGS_DIR, tile)
+            if download_file(url, dest):
+                return tile, True
+            return tile, False
+
+        print(f"  Descargando {len(pending)} tiles con 4 hilos en paralelo...\n")
+        ok = total_ok
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_download_tile, t): t for t in pending}
+            for future in as_completed(futures):
+                tile, success = future.result()
+                if success:
+                    ok += 1
+                    print(f"  [{ok}/{len(GOOGLE_BUILDINGS_TILES)}] {tile} listo")
+                else:
+                    print(f"  FALLO: {tile}")
+
+        print(f"\nGoogle: {ok}/{len(GOOGLE_BUILDINGS_TILES)} tiles disponibles en '{GOOGLE_BUILDINGS_DIR}/'")
+        return GOOGLE_BUILDINGS_DIR if ok > 0 else ""
 
 
 
