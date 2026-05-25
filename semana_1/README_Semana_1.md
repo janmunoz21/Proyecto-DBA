@@ -52,7 +52,10 @@ El modelo se organiza alrededor de cuatro entidades principales:
 
 **Resultados de Análisis** — conteos y áreas pre-agregadas por municipio y por dataset, para evitar re-ejecutar joins espaciales costosos.
 
-Todas las geometrías se almacenan como **GeoJSON** (`type: "MultiPolygon"`) en coordenadas **WGS84 (EPSG:4326)**, que es el único CRS compatible con los índices `2dsphere` de MongoDB. El área de cada edificio (`area_m2`) se almacena como atributo precalculado en metros cuadrados, aprovechando que ambas fuentes lo suministran directamente (`area_in_meters` en Google, calculado sobre WGS84 en Microsoft). Esto evita la necesidad de reprojectar geometrías para los cálculos de área.
+Todas las geometrías se almacenan como **GeoJSON** (`type: "MultiPolygon"`) en coordenadas **WGS84 (EPSG:4326)**, que es el único CRS compatible con los índices `2dsphere` de MongoDB. El área de cada edificio (`area_m2`) se almacena como atributo precalculado en metros cuadrados, aprovechando que ambas fuentes lo suministran directamente (`area_in_meters` en Google, calculado sobre WGS84 en Microsoft). Esto evita la necesidad de reproyectar geometrías para los cálculos de área.
+
+Antes de insertar, las geometrías se validan y reparan cuando es seguro hacerlo; si una geometría no puede recuperarse de forma confiable, se omite y se registra con trazabilidad para no romper la ingesta.
+
 
 ---
 
@@ -120,7 +123,7 @@ db.buildings_microsoft.createIndex({ "municipality_code": 1 })
     "coordinates": [[[[lon, lat], "..."]]]
   },
   "area_m2": 64.1,               // Campo area_in_meters de la fuente (metros cuadrados)
-  "confidence": 0.87,            // Específico de Google: confianza de detección [0.65, 1.0]
+  "confidence_score": 0.87,      // Específico de Google: confianza de detección [0.65, 1.0]
   "municipality_code": "string",
   "source": "google",
   "ingested_at": "ISODate"
@@ -131,7 +134,7 @@ db.buildings_microsoft.createIndex({ "municipality_code": 1 })
 ```javascript
 db.buildings_google.createIndex({ "geometry": "2dsphere" })
 db.buildings_google.createIndex({ "municipality_code": 1 })
-db.buildings_google.createIndex({ "confidence": 1 })
+db.buildings_google.createIndex({ "confidence_score": 1 })
 ```
 
 ---

@@ -1,26 +1,52 @@
 import os
+import argparse
 import requests
 import zipfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # URLs de descarga
-MGN_LINK = "https://geoportal.dane.gov.co/descargas/mgn_2025/MGN2025_00_COLOMBIA.zip"
+MGN_LINK  = "https://geoportal.dane.gov.co/descargas/mgn_2025/MGN2025_00_COLOMBIA.zip"
 PDET_LINK = "https://centralpdet.renovacionterritorio.gov.co/wp-content/uploads/2022/01/MunicipiosPDET.xlsx"
 
-# Urls de edificios - TODO: hacer verificaciones de disponibilidad antes de ejecutar el proyecto
-MICROSOFT_BUILDINGS_LINK = "https://minedbuildings.blob.core.windows.net/colombia/Colombia.geojson"
-GOOGLE_BUILDINGS_LINK = "https://data.sourcecoop.io/google-open-buildings/v3/colombia.geojson"
+# Microsoft: índice maestro con URLs particionadas por quadkey
+# Referencia: https://github.com/microsoft/GlobalMLBuildingFootprints
+MS_BUILDINGS_INDEX = "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
+MS_BUILDINGS_DIR   = "ms_buildings"
 
-# estos son los links oficiales, pero es para señalar en el mapa una ubicación especifica (pueden ser usados en el reporte de la semana)
-# https://github.com/microsoft/GlobalMLBuildingFootprints
-# https://sites.research.google/open-buildings/?hl=es-419
-# https://sites.research.google/gr/open-buildings/
+# Google Open Buildings v3 — tiles S2 nivel 4 que cubren Colombia
+# Tokens calculados con s2sphere para bbox Colombia: lat -5..13, lon -82..-66
+# Acceso público directo desde Google Cloud Storage
+# Referencia: https://sites.research.google/gr/open-buildings/
+GOOGLE_BUILDINGS_BASE = "https://storage.googleapis.com/open-buildings-data/v3/polygons_s2_level_4_gzip"
+GOOGLE_BUILDINGS_TILES = [
+    "8c3_buildings.csv.gz",
+    "8dd_buildings.csv.gz",
+    "8df_buildings.csv.gz",
+    "8e1_buildings.csv.gz",
+    "8e3_buildings.csv.gz",
+    "8e5_buildings.csv.gz",
+    "8e7_buildings.csv.gz",
+    "8e9_buildings.csv.gz",
+    "8ef_buildings.csv.gz",
+    "8f1_buildings.csv.gz",
+    "8fb_buildings.csv.gz",
+    "8fd_buildings.csv.gz",
+    "903_buildings.csv.gz",
+    "905_buildings.csv.gz",
+    "919_buildings.csv.gz",
+    "91b_buildings.csv.gz",
+    "91d_buildings.csv.gz",
+    "91f_buildings.csv.gz",
+    "921_buildings.csv.gz",
+    "923_buildings.csv.gz",
+]
+GOOGLE_BUILDINGS_DIR   = "google_buildings"
 
 # Rutas de archivos
-MGN_ZIP = "MGN2025_00_COLOMBIA.zip"
+MGN_ZIP   = "MGN2025_00_COLOMBIA.zip"
 PDET_FILE = "MunicipiosPDET.xlsx"
-MS_BUILDINGS_FILE = "buildings_microsoft.geojson"
-GOOG_BUILDINGS_FILE = "buildings_google.geojson"
 
 
 def file_exists(file_path: str) -> bool:
@@ -34,29 +60,71 @@ def shapefile_exists(shp_path: str) -> bool:
 
 
 def download_file(url: str, filename: str) -> bool:
-    """Descarga un archivo desde una URL."""
-    try:
-        print(f"Descargando {filename}...")
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        
-        with open(filename, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        percentage = (downloaded / total_size) * 100
-                        print(f"Progreso: {percentage:.1f}%", end='\r')
-        
-        print(f"{filename} descargado exitosamente\n")
-        return True
-    except Exception as e:
-        print(f"Error al descargar {filename}: {e}\n")
-        return False
+    """Descarga un archivo desde una URL con reintentos y reanudación parcial."""
+    max_retries = 5
+    chunk_size = 1024 * 1024  # 1MB para reducir overhead en archivos grandes
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            existing_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+            headers = {}
+            mode = "wb"
+
+            if existing_size > 0:
+                headers["Range"] = f"bytes={existing_size}-"
+                mode = "ab"
+
+            if existing_size > 0:
+                print(f"Reintentando {filename} (intento {attempt}/{max_retries}) desde byte {existing_size:,}...")
+            else:
+                print(f"Descargando {filename} (intento {attempt}/{max_retries})...")
+
+            with requests.get(url, stream=True, timeout=(15, 120), headers=headers) as response:
+                if response.status_code == 416:
+                    # El servidor reporta que ya no hay más bytes por descargar.
+                    print(f"{filename} ya estaba descargado (respuesta 416).\n")
+                    return True
+
+                # Si el servidor no soporta Range, reiniciar desde cero.
+                if existing_size > 0 and response.status_code == 200:
+                    print("El servidor no soporta reanudación; reiniciando descarga desde cero...")
+                    existing_size = 0
+                    mode = "wb"
+
+                response.raise_for_status()
+
+                content_length = int(response.headers.get("content-length", 0))
+                total_size = existing_size + content_length if content_length > 0 else 0
+                downloaded = existing_size
+
+                with open(filename, mode) as f:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percentage = (downloaded / total_size) * 100
+                            print(f"Progreso: {percentage:.1f}%", end="\r")
+
+                if total_size > 0 and downloaded < total_size:
+                    raise IOError(
+                        f"Descarga incompleta: {downloaded} de {total_size} bytes"
+                    )
+
+                print(f"\n{filename} descargado exitosamente\n")
+                return True
+
+        except Exception as e:
+            print(f"Error al descargar {filename} (intento {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                wait_seconds = min(2 ** attempt, 10)
+                print(f"Reintentando en {wait_seconds}s...\n")
+                time.sleep(wait_seconds)
+            else:
+                print(f"Fallo definitivo al descargar {filename} tras {max_retries} intentos.\n")
+
+    return False
 
 
 def extract_zip(zip_path: str, extract_path: str = ".") -> bool:
@@ -72,7 +140,21 @@ def extract_zip(zip_path: str, extract_path: str = ".") -> bool:
         return False
 
 
-def check_and_download_files(shp_path: str) -> bool:
+def validate_zip(zip_path: str) -> bool:
+    """Valida integridad básica del ZIP antes de extraer."""
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            bad_file = zip_ref.testzip()
+            if bad_file is not None:
+                print(f"ZIP corrupto: entrada inválida detectada ({bad_file})\n")
+                return False
+        return True
+    except Exception as e:
+        print(f"No se pudo validar el ZIP {zip_path}: {e}\n")
+        return False
+
+
+def check_and_download_files(shp_path: str, force_mgn_redownload: bool = False) -> bool:
     """Verifica la existencia de archivos necesarios y los descarga si es necesario."""
     print("\n" + "="*60)
     print("VERIFICACION DE ARCHIVOS")
@@ -93,13 +175,23 @@ def check_and_download_files(shp_path: str) -> bool:
     
     # Verificar shapefile
     print(f"2. Verificando shapefile...")
-    if shapefile_exists(shp_path):
+    if force_mgn_redownload:
+        print("   Redescarga forzada de MGN activada")
+        if file_exists(MGN_ZIP):
+            os.remove(MGN_ZIP)
+            print(f"   Archivo previo eliminado: {MGN_ZIP}")
+        part_file = f"{MGN_ZIP}.part"
+        if file_exists(part_file):
+            os.remove(part_file)
+            print(f"   Archivo parcial eliminado: {part_file}")
+
+    if shapefile_exists(shp_path) and not force_mgn_redownload:
         print(f"   Shapefile encontrado en {shp_path}\n")
     else:
         print(f"   Shapefile no encontrado")
         print("   Descargando datos MGN 2025...")
         if download_file(MGN_LINK, MGN_ZIP):
-            if extract_zip(MGN_ZIP):
+            if validate_zip(MGN_ZIP) and extract_zip(MGN_ZIP):
                 if shapefile_exists(shp_path):
                     print(f"   Shapefile listo para usar\n")
                 else:
@@ -114,31 +206,111 @@ def check_and_download_files(shp_path: str) -> bool:
 
 
 
-def check_and_download_buildings(dataset_type: str) -> str:
-    """Verifica y descarga específicamente los archivos de edificios de Microsoft o Google"""
-    if dataset_type == "microsoft":
-        url = MICROSOFT_BUILDINGS_LINK
-        filename = MS_BUILDINGS_FILE
-    else:
-        url = GOOGLE_BUILDINGS_LINK
-        filename = GOOG_BUILDINGS_FILE
-        
-    print(f"\n-> Verificando fuente de edificios: {filename}")
-    if file_exists(filename):
-        print(f"✓ Dataset de {dataset_type} ya se encuentra en el directorio local.")
-        return filename
-        
-    print(f"⚠ Dataset de {dataset_type} faltante.")
-    # Nota: los archivos pesan gigabytes en entornos reales
-    # Es por esto que se deja el flujo listo para descargar o mapear localmente de forma segura
-    confirm = input(f"¿Deseas intentar descargar el archivo remoto de {dataset_type}? (s/n): ").strip().lower()
-    if confirm == 's':
+def _download_microsoft_buildings() -> str:
+    """
+    Descarga los 233 archivos particionados de Microsoft Buildings para Colombia
+    usando el índice maestro. Devuelve la carpeta de destino si tiene éxito.
+    """
+    import io
+    import csv
+
+    os.makedirs(MS_BUILDINGS_DIR, exist_ok=True)
+
+    print(f"Descargando índice maestro de Microsoft Buildings...")
+    try:
+        response = requests.get(MS_BUILDINGS_INDEX, timeout=30)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error al descargar el índice: {e}")
+        return ""
+
+    reader = csv.DictReader(io.StringIO(response.text))
+    colombia_urls = [row["Url"] for row in reader if row.get("Location") == "Colombia"]
+
+    if not colombia_urls:
+        print("No se encontraron entradas de Colombia en el índice.")
+        return ""
+
+    print(f"Encontradas {len(colombia_urls)} particiones para Colombia.")
+    total = len(colombia_urls)
+    ok = 0
+    for i, url in enumerate(colombia_urls, 1):
+        filename = os.path.join(MS_BUILDINGS_DIR, url.split("/")[-1])
+        if file_exists(filename):
+            ok += 1
+            print(f"  [{i}/{total}] Ya existe: {os.path.basename(filename)}")
+            continue
+        print(f"  [{i}/{total}] ", end="")
         if download_file(url, filename):
-            return filename
-    
-    # Si no se descarga, se solicita la ruta local
-    local_path = input(f"Por favor ingresa la ruta local de tu archivo {dataset_type} (ej: data/{filename}): ").strip()
-    return local_path if file_exists(local_path) else ""
+            ok += 1
+
+    print(f"\nMicrosoft: {ok}/{total} particiones disponibles en '{MS_BUILDINGS_DIR}/'")
+    return MS_BUILDINGS_DIR if ok > 0 else ""
+
+
+def check_and_download_buildings(dataset_type: str) -> str:
+    """
+    Verifica y descarga los archivos de edificios de Microsoft o Google.
+    Devuelve la ruta al archivo/carpeta listo para ingesta, o "" si no está disponible.
+    """
+    if dataset_type == "microsoft":
+        print(f"\n-> Verificando dataset Microsoft Buildings en '{MS_BUILDINGS_DIR}/'")
+        # Considerar disponible si la carpeta tiene al menos un archivo .csv.gz
+        existing = []
+        if os.path.isdir(MS_BUILDINGS_DIR):
+            existing = [f for f in os.listdir(MS_BUILDINGS_DIR) if f.endswith(".csv.gz")]
+
+        if existing:
+            print(f"  {len(existing)} particiones ya descargadas en '{MS_BUILDINGS_DIR}/'.")
+            return MS_BUILDINGS_DIR
+
+        print("  Particiones no encontradas localmente.")
+        confirm = input("¿Deseas descargar las 233 particiones de Colombia (~varios GB)? (s/n): ").strip().lower()
+        if confirm == 's':
+            return _download_microsoft_buildings()
+
+        local_path = input("Ingresa la ruta a la carpeta con las particiones .csv.gz: ").strip()
+        return local_path if os.path.isdir(local_path) else ""
+
+    else:  # google
+        print(f"\n-> Verificando dataset Google Open Buildings en '{GOOGLE_BUILDINGS_DIR}/'")
+        os.makedirs(GOOGLE_BUILDINGS_DIR, exist_ok=True)
+
+        existing = {f for f in os.listdir(GOOGLE_BUILDINGS_DIR) if f.endswith(".csv.gz")}
+        pending = [t for t in GOOGLE_BUILDINGS_TILES if t not in existing]
+
+        if not pending:
+            print(f"  {len(GOOGLE_BUILDINGS_TILES)} tiles ya descargados en '{GOOGLE_BUILDINGS_DIR}/'.")
+            return GOOGLE_BUILDINGS_DIR
+
+        total_ok = len(GOOGLE_BUILDINGS_TILES) - len(pending)
+        print(f"  {len(pending)} tiles pendientes (~5 GB comprimido, descarga en paralelo).")
+        confirm = input("¿Deseas descargarlos ahora? (s/n): ").strip().lower()
+        if confirm != 's':
+            local_path = input("Ingresa la ruta a la carpeta con los tiles .csv.gz: ").strip()
+            return local_path if os.path.isdir(local_path) else ""
+
+        def _download_tile(tile):
+            url  = f"{GOOGLE_BUILDINGS_BASE}/{tile}"
+            dest = os.path.join(GOOGLE_BUILDINGS_DIR, tile)
+            if download_file(url, dest):
+                return tile, True
+            return tile, False
+
+        print(f"  Descargando {len(pending)} tiles con 4 hilos en paralelo...\n")
+        ok = total_ok
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_download_tile, t): t for t in pending}
+            for future in as_completed(futures):
+                tile, success = future.result()
+                if success:
+                    ok += 1
+                    print(f"  [{ok}/{len(GOOGLE_BUILDINGS_TILES)}] {tile} listo")
+                else:
+                    print(f"  FALLO: {tile}")
+
+        print(f"\nGoogle: {ok}/{len(GOOGLE_BUILDINGS_TILES)} tiles disponibles en '{GOOGLE_BUILDINGS_DIR}/'")
+        return GOOGLE_BUILDINGS_DIR if ok > 0 else ""
 
 
 
@@ -176,3 +348,32 @@ def ask_load_data() -> bool:
             return False
         else:
             print("Por favor, responde 's' o 'n'")
+
+
+def _run_cli() -> int:
+    """Permite ejecutar este módulo directamente para verificar/descargar archivos base."""
+    parser = argparse.ArgumentParser(
+        description="Verifica y descarga MGN/PDET para el proyecto DBA"
+    )
+    parser.add_argument(
+        "--shp-path",
+        default="MGN_2025_COLOMBIA/ADMINISTRATIVO/MGN_ADM_MPIO_GRAFICO.shp",
+        help="Ruta del shapefile municipal esperado"
+    )
+    parser.add_argument(
+        "--force-mgn-redownload",
+        action="store_true",
+        help="Borra y descarga de nuevo el ZIP MGN antes de validar"
+    )
+    args = parser.parse_args()
+
+    ok = check_and_download_files(
+        shp_path=args.shp_path,
+        force_mgn_redownload=args.force_mgn_redownload,
+    )
+    print(f"\nResultado final: {'OK' if ok else 'ERROR'}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_cli())
