@@ -8,7 +8,7 @@ Esta entrega documenta la integración de las huellas de edificios de Microsoft 
 
 ## 2. Lo que pide la entrega de la semana 3
 
-De acuerdo con [project.md](../project.md), la semana 3 corresponde a la carga de los footprints de edificios y debe incluir como mínimo:
+La semana 3 corresponde a la carga de los footprints de edificios y debe incluir como mínimo:
 
 - carga de los dos datasets seleccionados;
 - persistencia en MongoDB con índice espacial;
@@ -103,26 +103,6 @@ MENU PRINCIPAL
 7. EDA - Auditoría exploratoria completa
 
 8. Salir
-
-Selecciona una opcion (1-8): 1
-...
- 170 municipios sincronizados
- Índice 2dsphere creado
-
-Selecciona una opcion (1-8): 2
-...
-   Verificacion exitosa: todos los 170 municipios PDET estan en MongoDB
-
-Selecciona una opcion (1-8): 3
--> Verificando dataset Microsoft Buildings en 'ms_buildings/'
-  136 particiones ya descargadas en 'ms_buildings/'.
-  0 particiones relevantes a procesar.
-  Ingesta completada: 0 documentos insertados en esta sesion.
-
-Selecciona una opcion (1-8): 4
--> Verificando dataset Google Open Buildings en 'google_buildings/'
-  20 tiles ya descargados en 'google_buildings/'.
-  Ingesta completada: 0 documentos insertados en esta sesion.
 
 Selecciona una opcion (1-8): 7
 ============================================================
