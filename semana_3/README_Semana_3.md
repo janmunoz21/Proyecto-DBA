@@ -1,124 +1,119 @@
-# Entrega Semana 3 - Carga de Footprints de Edificios
+# Entrega Semana 3 - Carga e Integración de Huellas de Edificios
 
-## 1. Objetivo de la Semana
+## 1. Objetivo de la semana
 
-Integrar en MongoDB las huellas de edificios provenientes de Microsoft Building Footprints y Google Open Buildings, almacenandolas en colecciones geoespaciales separadas y dejandolas preparadas para consultas espaciales y cruces con municipios PDET en la siguiente fase del proyecto.
-
----
-
-## 2. Estructura del Trabajo
-
-### 2.1 Fuentes de Datos
-
-- **Microsoft Building Footprints**
-  - Archivo esperado: `buildings_microsoft.geojson`
-  - Formato geoespacial: GeoJSON
-  - Uso: carga de footprints de edificios detectados por Microsoft
-
-- **Google Open Buildings**
-  - Archivo esperado: `buildings_google.geojson`
-  - Formato geoespacial: GeoJSON
-  - Uso: carga de footprints de edificios detectados por Google
-
-### 2.2 Procesos Implementados
-
-#### a) Seleccion de fuente desde menu
-- El sistema permite elegir desde `main.py` la ingesta de Microsoft o Google
-- Cada opcion dispara un flujo independiente de carga
-
-#### b) Verificacion y obtencion del archivo
-- Se comprueba si el dataset esta disponible localmente
-- Si no existe, el sistema ofrece descargarlo o solicitar una ruta local
-
-#### c) Lectura y transformacion geoespacial
-- Los archivos se leen con GeoPandas
-- Las geometrias se transforman a formato GeoJSON compatible con MongoDB
-- Si el CRS no esta en WGS84, se reproyecta a `EPSG:4326`
-
-#### d) Insercion en MongoDB
-- Colecciones objetivo:
-  - `buildings_microsoft`
-  - `buildings_google`
-- Se crea indice geoespacial `2dsphere` sobre el campo `geometry`
-- Se agregan campos administrativos como fuente y fecha de ingesta
-
-### 2.3 Esquema de Documento
-
-#### Microsoft
-
-```json
-{
-  "_id": ObjectId,
-  "geometry": {
-    "type": "Polygon o MultiPolygon",
-    "coordinates": []
-  },
-  "area_m2": 123.45,
-  "dataset_source": "microsoft",
-  "ingested_at": ISODate("2026-05-24T00:00:00Z")
-}
-```
-
-#### Google
-
-```json
-{
-  "_id": ObjectId,
-  "geometry": {
-    "type": "Polygon o MultiPolygon",
-    "coordinates": []
-  },
-  "area_m2": 123.45,
-  "dataset_source": "google",
-  "confidence_score": 0.91,
-  "ingested_at": ISODate("2026-05-24T00:00:00Z")
-}
-```
+Esta entrega documenta la integración de las huellas de edificios de Microsoft y Google en MongoDB, con el fin de dejar listas las colecciones espaciales, sus índices `2dsphere` y la base para el análisis geoespacial posterior.
 
 ---
 
-## 3. Procedimientos de Administracion de Base de Datos
+## 2. Lo que pide la entrega de la semana 3
 
-- Separacion de datasets por coleccion para facilitar administracion y trazabilidad
-- Creacion de indice geoespacial `2dsphere` en el campo `geometry`
-- Estandarizacion del CRS a `EPSG:4326` para compatibilidad con MongoDB
-- Insercion masiva de documentos para mejorar el rendimiento de escritura
-- Registro de `ingested_at` para auditoria basica de carga
-- Registro de `dataset_source` para mantener identificable el origen de cada documento
+La semana 3 corresponde a la carga de los footprints de edificios y debe incluir como mínimo:
 
----
+- carga de los dos datasets seleccionados;
+- persistencia en MongoDB con índice espacial;
+- eficiencia de carga;
+- auditoría inicial de los datos.
 
-## 4. Archivos Generados
-
-- `load_buildings.py` - Script principal para la lectura y carga de footprints
-- `main.py` - Menu principal y control de ejecucion
-- `download_manager.py` - Gestion de disponibilidad y acceso a datasets
-- `semana_3/latex/lab_report.tex` - Documentacion tecnica detallada en LaTeX
+Eso ya quedó cubierto con el flujo actual del proyecto.
 
 ---
 
-## 5. Disponibilidad de Documentacion Completa
+## 3. Implementación realizada
 
-La documentacion tecnica detallada de esta entrega se encuentra en:
+### 3.1 Verificación y descarga de insumos
 
-- `semana_3/latex/lab_report.tex`
+El módulo [download_manager.py](../download_manager.py) valida y gestiona los insumos necesarios para la ejecución:
 
-El documento desarrolla:
+- verifica `MunicipiosPDET.xlsx` y el shapefile del MGN;
+- descarga archivos faltantes con reintentos y reanudación parcial;
+- valida el ZIP antes de extraerlo;
+- detecta y descarga las particiones de Microsoft y los tiles de Google;
+- solicita la configuración de MongoDB desde consola.
 
-- arquitectura de la semana 3
-- explicacion del codigo involucrado
-- procedimientos administrativos sobre MongoDB
-- indexacion geoespacial
-- normalizacion de geometria y modelo documental
-- secuencia operativa de carga
+### 3.2 Ingesta de huellas de edificios
+
+El módulo [load_buildings.py](../load_buildings.py) implementa la carga optimizada de ambas fuentes. La lógica ya incorporada incluye:
+
+- filtrado espacial previo sobre los municipios PDET cargados en MongoDB;
+- uso de `STRtree` para acelerar las intersecciones espaciales;
+- prefiltro por `bbox` antes de construir geometrías completas;
+- procesamiento por chunks para evitar problemas de memoria;
+- sanitización y normalización de geometrías antes de insertar;
+- cálculo de `area_m2` con datos fuente o mediante geodesia, según el dataset;
+- persistencia incremental del progreso para no repetir particiones ya cargadas;
+- creación y reparación automática del índice `2dsphere`.
+
+### 3.3 Esquema de datos
+
+Se usan dos colecciones principales:
+
+- `buildings_microsoft`
+- `buildings_google`
+
+Cada documento conserva, como mínimo:
+
+- `geometry` en GeoJSON `MultiPolygon`;
+- `area_m2`;
+- `source`;
+- `ingested_at`;
+- `confidence_score` para Google cuando el campo está disponible.
 
 ---
 
-## 6. Proximos Pasos
+## 4. Auditoría inicial
 
-**Semana 4:** Analisis geoespacial y agregaciones
+El módulo [eda_buildings.py](../eda_buildings.py) permite revisar que la carga quedó consistente. La auditoría incluye:
 
-- Cruce espacial entre footprints y municipios PDET
-- Conteo de edificios por municipio
-- Suma de area construida por fuente
-- Generacion de resultados agregados para analisis territorial
+- conteo de documentos por colección;
+- estadísticas de área: media, mínimo, máximo y desviación estándar;
+- distribución por quintiles;
+- validación de calidad de datos;
+- revisión de índices;
+- muestra de documentos representativos.
+
+Con esto queda lista la base para la semana 4, donde se ejecuta el cruce espacial por municipio y el cálculo agregado de edificios y área de techos.
+
+---
+
+## 5. Evidencia de ejecución
+
+La siguiente salida de consola resume la verificación y la carga ya realizadas:
+
+```text
+============================================================
+VERIFICACION DE ARCHIVOS
+============================================================
+
+1. Verificando MunicipiosPDET.xlsx...
+   Municipios PDET en Excel: 170
+
+2. Verificando shapefile...
+   Shapefile encontrado en MGN_2025_COLOMBIA/ADMINISTRATIVO/MGN_ADM_MPIO_GRAFICO.shp
+
+============================================================
+MENU PRINCIPAL
+============================================================
+1. Cargar municipios PDET en MongoDB
+2. Verificar municipios PDET
+3. Ingestar huellas de edificios - MICROSOFT
+4. Ingestar huellas de edificios - GOOGLE
+5. Reparar y reindexar colecciones de edificios
+6. Análisis geoespacial, conteo y área por municipio
+7. EDA - Auditoría exploratoria completa
+
+8. Salir
+
+Selecciona una opcion (1-8): 7
+============================================================
+ EDA - BUILDING FOOTPRINTS (Microsoft & Google)
+ Base de datos: upme-project
+============================================================
+
+  buildings_microsoft    :    1,237,245 documentos  [OK]
+  buildings_google       :    2,693,803 documentos  [OK]
+
+  Registros con confidence_score:  2,693,803  (100.00%)
+  Registros sin confidence_score:          0  (0.00%)
+
+  Índices 2dsphere presentes en ambas colecciones
